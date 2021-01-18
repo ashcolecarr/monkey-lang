@@ -1,3 +1,5 @@
+use std::fmt::{Display, Formatter, Result};
+
 #[derive(Debug, PartialEq)]
 pub enum TokenType {
     Illegal,
@@ -37,9 +39,16 @@ pub enum TokenType {
     Return,
 }
 
+#[derive(Debug)]
 pub struct Token {
     pub token_type: TokenType,
     pub literal: String,
+}
+
+impl Display for Token {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 impl Token {

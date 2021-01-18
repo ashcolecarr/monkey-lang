@@ -28,7 +28,6 @@ impl Lexer {
 
         let token_type = match self.ch {
             '=' => {
-                eprintln!("Peek {}", self.peek_char());
                 if self.peek_char() == '=' {
                     let ch = self.ch;
                     self.read_char();
