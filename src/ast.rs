@@ -1,20 +1,12 @@
 use super::token::Token;
-
-pub struct Node {
-    pub token_literal: String,
-}
-
-impl Node {
-    pub fn new() -> Self {
-        Self { token_literal: String::new() }
-    }
-}
+use std::any::Any;
 
 pub trait Statement: StatementClone {
-    fn statement_node(&self);
     fn token_literal(&self) -> String;
+    fn to_string(&self) -> String;
     fn get_name(&self) -> Identifier;
     fn type_of(&self) -> &'static str;
+    fn expression(&self) -> Option<Box<dyn Expression>>;
 }
 
 pub trait StatementClone {
@@ -34,9 +26,11 @@ impl Clone for Box<dyn Statement> {
 }
 
 pub trait Expression: ExpressionClone {
-    fn expression_node(&self);
     fn token_literal(&self) -> String;
+    fn value(&self) -> String;
+    fn to_string(&self) -> String;
     fn type_of(&self) -> &'static str;
+    fn as_any(&self) -> &dyn Any;
 }
 
 pub trait ExpressionClone {
@@ -63,16 +57,25 @@ pub struct LetStatement {
 }
 
 impl LetStatement {
-    pub fn new(token: Token, name: Identifier) -> Self {//}, value: Box<dyn Expression>) -> Self {
-        Self { token, name, value: None }
+    pub fn new(token: Token, name: Identifier, value: Option<Box<dyn Expression>>) -> Self {
+        Self { token, name, value }
     }
 }
 
 impl Statement for LetStatement {
-    fn statement_node(&self) { }
-
     fn token_literal(&self) -> String {
         self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        let mut return_string = format!("{} {}", self.token_literal(), self.name.value);
+        return_string += " = ";
+        // Avoiding a borrow-checker error.
+        return_string += self.value.clone()
+            .map(|v| v.to_string()).unwrap_or_else(String::new).as_str();
+        return_string += ";";
+
+        return_string
     }
 
     fn get_name(&self) -> Identifier {
@@ -81,6 +84,10 @@ impl Statement for LetStatement {
 
     fn type_of(&self) -> &'static str {
         "LetStatement"
+    }
+
+    fn expression(&self) -> Option<Box<dyn Expression>> {
+        self.value.clone()
     }
 }
 
@@ -91,16 +98,24 @@ pub struct ReturnStatement {
 }
 
 impl ReturnStatement {
-    pub fn new(token: Token) -> Self {//}, value: Box<dyn Expression>) -> Self {
-        Self { token, return_value: None }
+    pub fn new(token: Token, return_value: Option<Box<dyn Expression>>) -> Self {
+        Self { token, return_value }
     }
 }
 
 impl Statement for ReturnStatement {
-    fn statement_node(&self) { }
-
     fn token_literal(&self) -> String {
         self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        let mut return_string = format!("{} ", self.token_literal());
+        // As above.
+        return_string += self.return_value.clone()
+            .map(|v| v.to_string()).unwrap_or_else(String::new).as_str();
+        return_string += ";";
+
+        return_string
     }
 
     fn get_name(&self) -> Identifier {
@@ -109,6 +124,46 @@ impl Statement for ReturnStatement {
 
     fn type_of(&self) -> &'static str {
         "ReturnStatement"
+    }
+
+    fn expression(&self) -> Option<Box<dyn Expression>> {
+        self.return_value.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct ExpressionStatement {
+    pub token: Token,
+    pub expression: Option<Box<dyn Expression>>,
+}
+
+impl ExpressionStatement {
+    pub fn new(token: Token, expression: Option<Box<dyn Expression>>) -> Self {
+        Self { token, expression }
+    }
+}
+
+impl Statement for ExpressionStatement {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        // As above.
+        self.expression.clone()
+            .map(|v| v.to_string()).unwrap_or_else(String::new)
+    }
+
+    fn get_name(&self) -> Identifier {
+        Identifier::new(self.token.clone(), self.token_literal())
+    }
+
+    fn type_of(&self) -> &'static str {
+        "ExpressionStatement"
+    }
+
+    fn expression(&self) -> Option<Box<dyn Expression>> {
+        self.expression.clone()
     }
 }
 
@@ -125,14 +180,130 @@ impl Identifier {
 }
 
 impl Expression for Identifier {
-    fn expression_node(&self) { }
-
     fn token_literal(&self) -> String {
         self.token.literal.clone()
     }
 
+    fn value(&self) -> String {
+        self.value.clone()
+    }
+
+    fn to_string(&self) -> String {
+        self.value.clone()
+    }
+
     fn type_of(&self) -> &'static str {
         "Identifier"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct IntegerLiteral {
+    pub token: Token,
+    pub value: i64,
+}
+
+impl IntegerLiteral {
+    pub fn new(token: Token, value: i64) -> Self {
+        Self { token, value }
+    }
+}
+
+impl Expression for IntegerLiteral {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        self.value.to_string()
+    }
+
+    fn to_string(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn type_of(&self) -> &'static str {
+        "IntegerLiteral"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct PrefixExpression {
+    pub token: Token,
+    pub operator: String,
+    pub right: Box<dyn Expression>
+}
+
+impl PrefixExpression {
+    pub fn new(token: Token, operator: String, right: Box<dyn Expression>) -> Self {
+        Self { token, operator, right }
+    }
+}
+
+impl Expression for PrefixExpression {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        String::new()
+    }
+
+    fn to_string(&self) -> String {
+        format!("({}{})", &self.operator, &self.right.to_string())
+    }
+
+    fn type_of(&self) -> &'static str {
+        "PrefixExpression"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct InfixExpression {
+    pub token: Token,
+    pub left: Box<dyn Expression>,
+    pub operator: String,
+    pub right: Box<dyn Expression>
+}
+
+impl InfixExpression {
+    pub fn new(token: Token, left: Box<dyn Expression>, operator: String, right: Box<dyn Expression>) -> Self {
+        Self { token, left, operator, right }
+    }
+}
+
+impl Expression for InfixExpression {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        String::new()
+    }
+
+    fn to_string(&self) -> String {
+        format!("({} {} {})", &self.left.to_string(),
+            &self.operator, &self.right.to_string())
+    }
+
+    fn type_of(&self) -> &'static str {
+        "InfixExpression"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 }
 
@@ -152,5 +323,37 @@ impl Program {
         } else {
             String::new()
         }
+    }
+
+    pub fn to_string(&self) -> String {
+        let mut return_string = String::new();
+
+        for statement in &self.statements {
+            return_string.push_str(statement.to_string().as_str());
+        }
+
+        return_string
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use super::super::token::TokenType;
+
+    #[test]
+    fn verify_to_string_returns_correct_value() {
+        let mut program = Program::new();
+
+        program.statements.push(
+            Box::new(
+                LetStatement::new(
+                    Token::new(TokenType::Let, String::from("let")), 
+                    Identifier::new(Token::new(TokenType::Ident, String::from("myVar")), String::from("myVar")), 
+                    Some(Box::new(
+                        Identifier::new(Token::new(TokenType::Ident, String::from("anotherVar")), String::from("anotherVar")))))
+            ));
+        
+        assert_eq!(program.to_string(), String::from("let myVar = anotherVar;"));
     }
 }
