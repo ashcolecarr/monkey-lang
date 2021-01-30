@@ -42,6 +42,8 @@ impl Parser {
         parser.prefix_parse_fns.insert(TokenType::Int, Parser::parse_integer_literal);
         parser.prefix_parse_fns.insert(TokenType::Bang, Parser::parse_prefix_expression);
         parser.prefix_parse_fns.insert(TokenType::Minus, Parser::parse_prefix_expression);
+        parser.prefix_parse_fns.insert(TokenType::True, Parser::parse_boolean);
+        parser.prefix_parse_fns.insert(TokenType::False, Parser::parse_boolean);
 
         parser.infix_parse_fns.insert(TokenType::Plus, Parser::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Minus, Parser::parse_infix_expression);
@@ -140,7 +142,9 @@ impl Parser {
         match prefix {
             Some(p) => {
                 let mut left_exp = p(self);
-                eprintln!("Token: {}", &self.current_token);
+                if left_exp.is_none() {
+                    return None;
+                }
 
                 while !self.peek_token_is(&TokenType::Semicolon) && *precedence < self.peek_precedence() {
                     // This clone is avoiding a mutable-immutable borrow here.
@@ -180,6 +184,10 @@ impl Parser {
                 None
             },
         }
+    }
+
+    fn parse_boolean(&mut self) -> Option<Box<dyn Expression>> {
+        Some(Box::new(Boolean::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
     }
 
     fn parse_prefix_expression(&mut self) -> Option<Box<dyn Expression>> {
@@ -262,6 +270,39 @@ impl Parser {
 mod tests {
     use super::*;
     use super::super::lexer::Lexer;
+
+    enum ExpType {
+        Int(i64),
+        Bool(bool),
+    }
+
+    trait ValueType {
+        fn get_type(&self) -> String;
+        fn get_i64(&self) -> i64;
+        fn get_string(&self) -> String;
+        fn get_boolean(&self) -> bool;
+    }
+
+    impl ValueType for i64 {
+        fn get_type(&self) -> String { String::from("i64") }
+        fn get_i64(&self) -> i64 { *self }
+        fn get_string(&self) -> String { panic!("Value is not a string.") }
+        fn get_boolean(&self) -> bool { panic!("Value is not a string.") }
+    }
+
+    impl ValueType for String {
+        fn get_type(&self) -> String { String::from("String") }
+        fn get_i64(&self) -> i64 { panic!("Value is not an i64.") }
+        fn get_string(&self) -> String { self.clone() }
+        fn get_boolean(&self) -> bool { panic!("Value is not an i64.") }
+    }
+
+    impl ValueType for bool {
+        fn get_type(&self) -> String { String::from("bool") }
+        fn get_i64(&self) -> i64 { panic!("Value is not a boolean.") }
+        fn get_string(&self) -> String { panic!("Value is not a boolean.") }
+        fn get_boolean(&self) -> bool { *self }
+    }
 
     #[test]
     fn verify_let_statements_are_parsed() {
@@ -346,7 +387,7 @@ return 993322;"#);
                         assert_eq!(what.value, String::from("foobar"));
                         assert_eq!(what.token_literal(), String::from("foobar"));
                     },
-                    None => panic!("Not an Identifier"),
+                    None => assert!(false, "Expression was not an Identifier."),
                 };
             },
             None => assert!(false, "Expression statement was not returned."),
@@ -376,7 +417,7 @@ return 993322;"#);
                         assert_eq!(what.value, 5);
                         assert_eq!(what.token_literal(), String::from("5"));
                     },
-                    None => panic!("Not an IntegerLiteral"),
+                    None => assert!(false, "Expression was not an IntegerLiteral."),
                 };
             },
             None => assert!(false, "Expression statement was not returned."),
@@ -388,12 +429,14 @@ return 993322;"#);
         struct PrefixTest {
             input: String,
             operator: String,
-            integer_value: i64,
+            value: ExpType,
         };
 
         let prefix_tests = vec![
-            PrefixTest { input: String::from("!5"), operator: String::from("!"), integer_value: 5, },
-            PrefixTest { input: String::from("-15"), operator: String::from("-"), integer_value: 15, },
+            PrefixTest { input: String::from("!5"), operator: String::from("!"), value: ExpType::Int(5), },
+            PrefixTest { input: String::from("-15"), operator: String::from("-"), value: ExpType::Int(15), },
+            PrefixTest { input: String::from("!true"), operator: String::from("!"), value: ExpType::Bool(true), },
+            PrefixTest { input: String::from("!false"), operator: String::from("!"), value: ExpType::Bool(false), },
         ];
 
         for prefix_test in prefix_tests {
@@ -410,20 +453,10 @@ return 993322;"#);
             let stmt = &program.unwrap().statements[0];
             match stmt.expression() {
                 Some(e) => {
-                    match e.as_any().downcast_ref::<PrefixExpression>() {
-                        Some(exp) => {
-                            assert_eq!(e.type_of(), "PrefixExpression");
-                            assert_eq!(exp.operator, prefix_test.operator);
-                            match exp.right.as_any().downcast_ref::<IntegerLiteral>() {
-                                Some(r) => {
-                                    assert_eq!(r.type_of(), "IntegerLiteral");
-                                    assert_eq!(r.value, prefix_test.integer_value);
-                                    assert_eq!(r.token_literal(), prefix_test.integer_value.to_string());
-                                },
-                                None => panic!("Not an IntegerLiteral"),
-                            };
-                        },
-                        None => panic!("Not a PrefixExpression"),
+                    match prefix_test.value {
+                        ExpType::Int(iv) => verify_prefix_expression(&e, &prefix_test.operator, iv),
+                        ExpType::Bool(bv) => verify_prefix_expression(&e, &prefix_test.operator, bv),
+                        _ => assert!(false, "Value type is not recognized"),
                     };
                 },
                 None => assert!(false, "Expression statement was not returned."),
@@ -435,20 +468,23 @@ return 993322;"#);
     fn verify_infix_expressions_are_parsed() {
         struct InfixTest {
             input: String,
-            left_value: i64,
+            left_value: ExpType,
             operator: String,
-            right_value: i64,
+            right_value: ExpType,
         };
 
         let infix_tests = vec![
-            InfixTest { input: String::from("5 + 5;"), left_value: 5, operator: String::from("+"), right_value: 5, },
-            InfixTest { input: String::from("5 - 5;"), left_value: 5, operator: String::from("-"), right_value: 5, },
-            InfixTest { input: String::from("5 * 5;"), left_value: 5, operator: String::from("*"), right_value: 5, },
-            InfixTest { input: String::from("5 / 5;"), left_value: 5, operator: String::from("/"), right_value: 5, },
-            InfixTest { input: String::from("5 > 5;"), left_value: 5, operator: String::from(">"), right_value: 5, },
-            InfixTest { input: String::from("5 < 5;"), left_value: 5, operator: String::from("<"), right_value: 5, },
-            InfixTest { input: String::from("5 == 5;"), left_value: 5, operator: String::from("=="), right_value: 5, },
-            InfixTest { input: String::from("5 != 5;"), left_value: 5, operator: String::from("!="), right_value: 5, },
+            InfixTest { input: String::from("5 + 5;"), left_value: ExpType::Int(5), operator: String::from("+"), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 - 5;"), left_value: ExpType::Int(5), operator: String::from("-"), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 * 5;"), left_value: ExpType::Int(5), operator: String::from("*"), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 / 5;"), left_value: ExpType::Int(5), operator: String::from("/"), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 > 5;"), left_value: ExpType::Int(5), operator: String::from(">"), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 < 5;"), left_value: ExpType::Int(5), operator: String::from("<"), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 == 5;"), left_value: ExpType::Int(5), operator: String::from("=="), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("5 != 5;"), left_value: ExpType::Int(5), operator: String::from("!="), right_value: ExpType::Int(5), },
+            InfixTest { input: String::from("true == true"), left_value: ExpType::Bool(true), operator: String::from("=="), right_value: ExpType::Bool(true), },
+            InfixTest { input: String::from("true != false"), left_value: ExpType::Bool(true), operator: String::from("!="), right_value: ExpType::Bool(false), },
+            InfixTest { input: String::from("false == false"), left_value: ExpType::Bool(false), operator: String::from("=="), right_value: ExpType::Bool(false), },
         ];
 
         for infix_test in infix_tests {
@@ -465,33 +501,149 @@ return 993322;"#);
             let stmt = &program.unwrap().statements[0];
             match stmt.expression() {
                 Some(e) => {
-                    match e.as_any().downcast_ref::<InfixExpression>() {
-                        Some(exp) => {
-                            assert_eq!(e.type_of(), "InfixExpression");
-                            match exp.left.as_any().downcast_ref::<IntegerLiteral>() {
-                                Some(r) => {
-                                    assert_eq!(r.type_of(), "IntegerLiteral");
-                                    assert_eq!(r.value, infix_test.left_value);
-                                    assert_eq!(r.token_literal(), infix_test.left_value.to_string());
-                                },
-                                None => panic!("Not an IntegerLiteral"),
-                            };
-                            assert_eq!(exp.operator, infix_test.operator);
-                            match exp.right.as_any().downcast_ref::<IntegerLiteral>() {
-                                Some(r) => {
-                                    assert_eq!(r.type_of(), "IntegerLiteral");
-                                    assert_eq!(r.value, infix_test.right_value);
-                                    assert_eq!(r.token_literal(), infix_test.right_value.to_string());
-                                },
-                                None => panic!("Not an IntegerLiteral"),
-                            };
-                        },
-                        None => panic!("Not an InfixExpression"),
+                    match (infix_test.left_value, infix_test.right_value) {
+                        (ExpType::Int(il), ExpType::Int(ir)) => verify_infix_expression(&e, il, &infix_test.operator, ir),
+                        (ExpType::Bool(bl), ExpType::Bool(br)) => verify_infix_expression(&e, bl, &infix_test.operator, br),
+                        _ => assert!(false, "Left and right value types are mismatched."),
                     };
                 },
                 None => assert!(false, "Expression statement was not returned."),
             };
         }
+    }
+
+    #[test]
+    fn verify_operator_precedences_are_parsed() {
+        struct OperatorTest {
+            input: String,
+            expected: String,
+        };
+
+        let operator_tests = vec![
+            OperatorTest { input: String::from("-a * b"), expected: String::from("((-a) * b)"), },
+            OperatorTest { input: String::from("!-a"), expected: String::from("(!(-a))"), },
+            OperatorTest { input: String::from("a + b + c"), expected: String::from("((a + b) + c)"), },
+            OperatorTest { input: String::from("a + b - c"), expected: String::from("((a + b) - c)"), },
+            OperatorTest { input: String::from("a * b * c"), expected: String::from("((a * b) * c)"), },
+            OperatorTest { input: String::from("a * b / c"), expected: String::from("((a * b) / c)"), },
+            OperatorTest { input: String::from("a + b / c"), expected: String::from("(a + (b / c))"), },
+            OperatorTest { input: String::from("a + b * c + d / e - f"), expected: String::from("(((a + (b * c)) + (d / e)) - f)"), },
+            OperatorTest { input: String::from("3 + 4; -5 * 5"), expected: String::from("(3 + 4)((-5) * 5)"), },
+            OperatorTest { input: String::from("5 > 4 == 3 < 4"), expected: String::from("((5 > 4) == (3 < 4))"), },
+            OperatorTest { input: String::from("5 < 4 != 3 > 4"), expected: String::from("((5 < 4) != (3 > 4))"), },
+            OperatorTest { input: String::from("3 + 4 * 5 == 3 * 1 + 4 * 5"), expected: String::from("((3 + (4 * 5)) == ((3 * 1) + (4 * 5)))"), },
+            OperatorTest { input: String::from("true"), expected: String::from("true"), },
+            OperatorTest { input: String::from("false"), expected: String::from("false"), },
+            OperatorTest { input: String::from("3 > 5 == false"), expected: String::from("((3 > 5) == false)"), },
+            OperatorTest { input: String::from("3 < 5 == true"), expected: String::from("((3 < 5) == true)"), },
+        ];
+
+        for operator_test in operator_tests {
+            let lexer = Lexer::new(operator_test.input);
+            let mut parser = Parser::new(lexer);
+            let program = parser.parse_program();
+            check_parser_errors(&parser);
+
+            match &program {
+                Some(p) => {
+                    let actual = p.to_string();
+                    assert_eq!(operator_test.expected, actual);
+                },
+                None => assert!(false, "parse_program() returned None."),
+            };
+        }
+    }
+
+    #[test]
+    fn verify_boolean_expressions_are_parsed() {
+        let input = String::from("true;");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<Boolean>() {
+                    Some(what) => {
+                        assert_eq!(what.value, true);
+                        assert_eq!(what.token_literal(), true.to_string());
+                    },
+                    None => panic!("Not  IntegerLiteral"),
+                };
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    fn verify_literal_expression<T>(expression: &Box<dyn Expression>, expected: T) where T: ValueType {
+        eprintln!("Expression type: {}", expected.get_type());
+        match expected.get_type().as_str() {
+            "i64" => verify_integer_literal(expression, expected.get_i64()),
+            "String" => verify_identifier(expression, &expected.get_string()),
+            "bool" => verify_boolean_literal(expression, expected.get_boolean()),
+            _ => assert!(false, "Expression type was not handled"),
+        }
+    }
+
+    fn verify_prefix_expression<T>(expression: &Box<dyn Expression>, operator: &String, value: T) where T: ValueType {
+        match expression.as_any().downcast_ref::<PrefixExpression>() {
+            Some(exp) => {
+                assert_eq!(exp.operator, *operator);
+                verify_literal_expression(&exp.right, value);
+            },
+            None => assert!(false, "Expression is not of type PrefixExpression."),
+        };
+    }
+
+    fn verify_infix_expression<T>(expression: &Box<dyn Expression>, left: T, 
+        operator: &String, right: T) where T: ValueType {
+
+        match expression.as_any().downcast_ref::<InfixExpression>() {
+            Some(exp) => {
+                verify_literal_expression(&exp.left, left);
+                assert_eq!(exp.operator, *operator);
+                verify_literal_expression(&exp.right, right);
+            },
+            None => assert!(false, "Expression is not of type InfixExpression."),
+        };
+    }
+
+    fn verify_integer_literal(expression: &Box<dyn Expression>, value: i64) {
+        match expression.as_any().downcast_ref::<IntegerLiteral>() {
+            Some(e) => {
+                assert_eq!(e.value, value);
+                assert_eq!(e.token_literal(), value.to_string());
+            },
+            None => assert!(false, "Expression is not of type IntegerLiteral"),
+        };
+    }
+
+    fn verify_identifier(expression: &Box<dyn Expression>, value: &String) {
+        match expression.as_any().downcast_ref::<Identifier>() {
+            Some(e) => {
+                assert_eq!(e.value, *value);
+                assert_eq!(e.token_literal(), *value);
+            },
+            None => assert!(false, "Expression is not of type Identifier"),
+        };
+    }
+
+    fn verify_boolean_literal(expression: &Box<dyn Expression>, value: bool) {
+        match expression.as_any().downcast_ref::<Boolean>() {
+            Some(e) => {
+                assert_eq!(e.value, value);
+                assert_eq!(e.token_literal(), value.to_string());
+            },
+            None => assert!(false, "Expression is not of type Boolean"),
+        };
     }
 
     fn check_parser_errors(parser: &Parser) {

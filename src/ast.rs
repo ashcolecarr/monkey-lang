@@ -236,6 +236,40 @@ impl Expression for IntegerLiteral {
 }
 
 #[derive(Clone)]
+pub struct Boolean {
+    pub token: Token,
+    pub value: bool,
+}
+
+impl Boolean {
+    pub fn new(token: Token, value: bool) -> Self {
+        Self { token, value }
+    }
+}
+
+impl Expression for Boolean {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        self.value.to_string()
+    }
+
+    fn to_string(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn type_of(&self) -> &'static str {
+        "Boolean"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
 pub struct PrefixExpression {
     pub token: Token,
     pub operator: String,
