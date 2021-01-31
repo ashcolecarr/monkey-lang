@@ -44,6 +44,8 @@ impl Parser {
         parser.prefix_parse_fns.insert(TokenType::Minus, Parser::parse_prefix_expression);
         parser.prefix_parse_fns.insert(TokenType::True, Parser::parse_boolean);
         parser.prefix_parse_fns.insert(TokenType::False, Parser::parse_boolean);
+        parser.prefix_parse_fns.insert(TokenType::LParen, Parser::parse_grouped_expression);
+        parser.prefix_parse_fns.insert(TokenType::If, Parser::parse_if_expression);
 
         parser.infix_parse_fns.insert(TokenType::Plus, Parser::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Minus, Parser::parse_infix_expression);
@@ -137,6 +139,24 @@ impl Parser {
         }
     }
 
+    fn parse_block_statement(&mut self) -> Option<Box<dyn Statement>> {
+        let current_token = self.current_token.clone();
+        let mut statements: Vec<Box<dyn Statement>> = Vec::new();
+
+        self.next_token();
+
+        while !self.current_token_is(&TokenType::RBrace) && !self.current_token_is(&TokenType::Eof) {
+            let statement = self.parse_statement();
+            match statement {
+                Some(s) => statements.push(s),
+                None => (),
+            };
+            self.next_token();
+        }
+
+        Some(Box::new(BlockStatement::new(current_token, statements)))
+    }
+
     fn parse_expression(&mut self, precedence: &Precedence) -> Option<Box<dyn Expression>> {
         let prefix = self.prefix_parse_fns.get(&self.current_token.token_type);
         match prefix {
@@ -170,26 +190,6 @@ impl Parser {
         }
     }
 
-    fn parse_identifier(&mut self) -> Option<Box<dyn Expression>> {
-        Some(Box::new(Identifier::new(self.current_token.clone(), self.current_token.literal.clone())))
-    }
-
-    fn parse_integer_literal(&mut self) -> Option<Box<dyn Expression>> {
-        match self.current_token.literal.parse::<i64>() {
-            Ok(v) => Some(Box::new(IntegerLiteral::new(self.current_token.clone(), v))),
-            Err(_e) => {
-                let msg = format!("Could not parse {} as an integer.", self.current_token.literal);
-                self.errors.push(msg);
-
-                None
-            },
-        }
-    }
-
-    fn parse_boolean(&mut self) -> Option<Box<dyn Expression>> {
-        Some(Box::new(Boolean::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
-    }
-
     fn parse_prefix_expression(&mut self) -> Option<Box<dyn Expression>> {
         let current_token = self.current_token.clone();
 
@@ -210,6 +210,73 @@ impl Parser {
 
         Some(Box::new(InfixExpression::new(current_token.clone(), 
             left.clone(), current_token.literal.clone(), right.unwrap())))
+    }
+
+    fn parse_identifier(&mut self) -> Option<Box<dyn Expression>> {
+        Some(Box::new(Identifier::new(self.current_token.clone(), self.current_token.literal.clone())))
+    }
+
+    fn parse_integer_literal(&mut self) -> Option<Box<dyn Expression>> {
+        match self.current_token.literal.parse::<i64>() {
+            Ok(v) => Some(Box::new(IntegerLiteral::new(self.current_token.clone(), v))),
+            Err(_e) => {
+                let msg = format!("Could not parse {} as an integer.", self.current_token.literal);
+                self.errors.push(msg);
+
+                None
+            },
+        }
+    }
+
+    fn parse_boolean(&mut self) -> Option<Box<dyn Expression>> {
+        Some(Box::new(Boolean::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
+    }
+
+    fn parse_grouped_expression(&mut self) -> Option<Box<dyn Expression>> {
+        self.next_token();
+
+        let expression = self.parse_expression(&Precedence::Lowest);
+        if !self.expect_peek(&TokenType::RParen) {
+            return None;
+        }
+
+        expression
+    }
+
+    fn parse_if_expression(&mut self) -> Option<Box<dyn Expression>> {
+        let current_token = self.current_token.clone();
+
+        if !self.expect_peek(&TokenType::LParen) {
+            return None;
+        }
+
+        self.next_token();
+        let condition = self.parse_expression(&Precedence::Lowest);
+
+        if !self.expect_peek(&TokenType::RParen) {
+            return None;
+        }
+
+        if !self.expect_peek(&TokenType::LBrace) {
+            return None;
+        }
+
+        let consequence = self.parse_block_statement();
+
+        let mut alternative = None;
+        if self.peek_token_is(&TokenType::Else) {
+            self.next_token();
+            if !self.expect_peek(&TokenType::LBrace) {
+                return None;
+            }
+
+            alternative = self.parse_block_statement()
+        }
+
+        match (condition, consequence) {
+            (Some(cond), Some(cons)) => Some(Box::new(IfExpression::new(current_token, cond, cons, alternative))),
+            _ => None,
+        }
     }
 
     fn current_token_is(&self, token_type: &TokenType) -> bool {
@@ -382,10 +449,10 @@ return 993322;"#);
         match stmt.expression() {
             Some(e) => {
                 match e.as_any().downcast_ref::<Identifier>() {
-                    Some(what) => {
+                    Some(ident) => {
                         assert_eq!(e.type_of(), "Identifier");
-                        assert_eq!(what.value, String::from("foobar"));
-                        assert_eq!(what.token_literal(), String::from("foobar"));
+                        assert_eq!(ident.value, String::from("foobar"));
+                        assert_eq!(ident.token_literal(), String::from("foobar"));
                     },
                     None => assert!(false, "Expression was not an Identifier."),
                 };
@@ -412,10 +479,10 @@ return 993322;"#);
         match stmt.expression() {
             Some(e) => {
                 match e.as_any().downcast_ref::<IntegerLiteral>() {
-                    Some(what) => {
+                    Some(int_lit) => {
                         assert_eq!(e.type_of(), "IntegerLiteral");
-                        assert_eq!(what.value, 5);
-                        assert_eq!(what.token_literal(), String::from("5"));
+                        assert_eq!(int_lit.value, 5);
+                        assert_eq!(int_lit.token_literal(), String::from("5"));
                     },
                     None => assert!(false, "Expression was not an IntegerLiteral."),
                 };
@@ -456,7 +523,6 @@ return 993322;"#);
                     match prefix_test.value {
                         ExpType::Int(iv) => verify_prefix_expression(&e, &prefix_test.operator, iv),
                         ExpType::Bool(bv) => verify_prefix_expression(&e, &prefix_test.operator, bv),
-                        _ => assert!(false, "Value type is not recognized"),
                     };
                 },
                 None => assert!(false, "Expression statement was not returned."),
@@ -536,6 +602,11 @@ return 993322;"#);
             OperatorTest { input: String::from("false"), expected: String::from("false"), },
             OperatorTest { input: String::from("3 > 5 == false"), expected: String::from("((3 > 5) == false)"), },
             OperatorTest { input: String::from("3 < 5 == true"), expected: String::from("((3 < 5) == true)"), },
+            OperatorTest { input: String::from("1 + (2 + 3) + 4"), expected: String::from("((1 + (2 + 3)) + 4)"), },
+            OperatorTest { input: String::from("(5 + 5) * 2"), expected: String::from("((5 + 5) * 2)"), },
+            OperatorTest { input: String::from("2 / (5 + 5)"), expected: String::from("(2 / (5 + 5))"), },
+            OperatorTest { input: String::from("-(5 + 5)"), expected: String::from("(-(5 + 5))"), },
+            OperatorTest { input: String::from("!(true == true)"), expected: String::from("(!(true == true))"), },
         ];
 
         for operator_test in operator_tests {
@@ -572,12 +643,107 @@ return 993322;"#);
         match stmt.expression() {
             Some(e) => {
                 match e.as_any().downcast_ref::<Boolean>() {
-                    Some(what) => {
-                        assert_eq!(what.value, true);
-                        assert_eq!(what.token_literal(), true.to_string());
+                    Some(boolean) => {
+                        assert_eq!(boolean.value, true);
+                        assert_eq!(boolean.token_literal(), true.to_string());
                     },
-                    None => panic!("Not  IntegerLiteral"),
+                    None => panic!("Not Boolean"),
                 };
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_if_expressions_are_parsed() {
+        let input = String::from("if (x < y) { x }");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<IfExpression>() {
+                    Some(if_exp) => {
+                        verify_infix_expression(&if_exp.condition, String::from("x"), &String::from("<"), String::from("y"));
+                        match if_exp.consequence.as_any().downcast_ref::<BlockStatement>() {
+                            Some(block) => {
+                                assert_eq!(block.statements.len(), 1);
+                                match block.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
+                                    Some(stmt_exp) => verify_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("x")),
+                                    None => assert!(false, "Not an ExpressionStatement"),
+                                };
+                            },
+                            None => assert!(false, "Not a BlockStatement"),
+                        }
+                        match &if_exp.alternative {
+                            Some(_) => assert!(false, "Alternative should be None."),
+                            None => (),
+                        };
+                    },
+                    None => assert!(false, "Not an IfExpression")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_if_else_expressions_are_parsed() {
+        let input = String::from("if (x < y) { x } else { y }");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<IfExpression>() {
+                    Some(if_exp) => {
+                        verify_infix_expression(&if_exp.condition, String::from("x"), &String::from("<"), String::from("y"));
+                        match if_exp.consequence.as_any().downcast_ref::<BlockStatement>() {
+                            Some(block) => {
+                                assert_eq!(block.statements.len(), 1);
+                                match block.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
+                                    Some(stmt_exp) => verify_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("x")),
+                                    None => assert!(false, "Not an ExpressionStatement"),
+                                };
+                            },
+                            None => assert!(false, "Not a BlockStatement"),
+                        }
+                        match &if_exp.alternative {
+                            Some(alt) => {
+                                match alt.as_any().downcast_ref::<BlockStatement>() {
+                                    Some(block) => {
+                                        assert_eq!(block.statements.len(), 1);
+                                        match block.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
+                                            Some(stmt_exp) => verify_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("y")),
+                                            None => assert!(false, "Not an ExpressionStatement"),
+                                        };
+                                    },
+                                    None => assert!(false, "Not a BlockStatement"),
+                                }
+                            },
+                            None => assert!(false, "Alternative should not be None."),
+                        };
+                    },
+                    None => assert!(false, "Not an IfExpression")
+                }
             },
             None => assert!(false, "Expression statement was not returned."),
         };

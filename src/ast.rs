@@ -6,6 +6,7 @@ pub trait Statement: StatementClone {
     fn to_string(&self) -> String;
     fn get_name(&self) -> Identifier;
     fn type_of(&self) -> &'static str;
+    fn as_any(&self) -> &dyn Any;
     fn expression(&self) -> Option<Box<dyn Expression>>;
 }
 
@@ -86,6 +87,10 @@ impl Statement for LetStatement {
         "LetStatement"
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn expression(&self) -> Option<Box<dyn Expression>> {
         self.value.clone()
     }
@@ -126,8 +131,55 @@ impl Statement for ReturnStatement {
         "ReturnStatement"
     }
 
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
     fn expression(&self) -> Option<Box<dyn Expression>> {
         self.return_value.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct BlockStatement {
+    pub token: Token,
+    pub statements: Vec<Box<dyn Statement>>,
+}
+
+impl BlockStatement {
+    pub fn new(token: Token, statements: Vec<Box<dyn Statement>>) -> Self {
+        Self { token, statements }
+    }
+}
+
+impl Statement for BlockStatement {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        let mut return_string = String::new();
+        for statement in &self.statements {
+            return_string += &statement.to_string();
+        }
+
+        return_string
+    }
+
+    fn get_name(&self) -> Identifier {
+        Identifier::new(self.token.clone(), String::new())
+    }
+
+    fn type_of(&self) -> &'static str {
+        "BlockStatement"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn expression(&self) -> Option<Box<dyn Expression>> {
+        None
     }
 }
 
@@ -160,6 +212,10 @@ impl Statement for ExpressionStatement {
 
     fn type_of(&self) -> &'static str {
         "ExpressionStatement"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
     }
 
     fn expression(&self) -> Option<Box<dyn Expression>> {
@@ -334,6 +390,46 @@ impl Expression for InfixExpression {
 
     fn type_of(&self) -> &'static str {
         "InfixExpression"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct IfExpression {
+    pub token: Token,
+    pub condition: Box<dyn Expression>,
+    pub consequence: Box<dyn Statement>,
+    pub alternative: Option<Box<dyn Statement>>,
+}
+
+impl IfExpression {
+    pub fn new(token: Token, condition: Box<dyn Expression>, consequence: Box<dyn Statement>, alternative: Option<Box<dyn Statement>>) -> Self {
+        Self { token, condition, consequence, alternative }
+    }
+}
+
+impl Expression for IfExpression {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        String::new()
+    }
+
+    fn to_string(&self) -> String {
+        format!("(if {} {} {})", &self.condition.to_string(),
+            &self.consequence.to_string(), match &self.alternative {
+                Some(alt) => String::from("else ") + &alt.to_string(),
+                None => String::new(),
+            })
+    }
+
+    fn type_of(&self) -> &'static str {
+        "IfExpression"
     }
 
     fn as_any(&self) -> &dyn Any {
