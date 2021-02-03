@@ -46,6 +46,7 @@ impl Parser {
         parser.prefix_parse_fns.insert(TokenType::False, Parser::parse_boolean);
         parser.prefix_parse_fns.insert(TokenType::LParen, Parser::parse_grouped_expression);
         parser.prefix_parse_fns.insert(TokenType::If, Parser::parse_if_expression);
+        parser.prefix_parse_fns.insert(TokenType::Function, Parser::parse_function_literal);
 
         parser.infix_parse_fns.insert(TokenType::Plus, Parser::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Minus, Parser::parse_infix_expression);
@@ -55,6 +56,7 @@ impl Parser {
         parser.infix_parse_fns.insert(TokenType::NotEq, Parser::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Lt, Parser::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Gt, Parser::parse_infix_expression);
+        parser.infix_parse_fns.insert(TokenType::LParen, Parser::parse_call_expression);
 
         parser
     }
@@ -105,11 +107,15 @@ impl Parser {
             return None;
         }
 
-        while !self.current_token_is(&TokenType::Semicolon) {
+        self.next_token();
+
+        let value = self.parse_expression(&Precedence::Lowest);
+
+        if self.peek_token_is(&TokenType::Semicolon) {
             self.next_token();
         }
 
-        Some(Box::new(LetStatement::new(current_token, name, None)))
+        Some(Box::new(LetStatement::new(current_token, name, value)))
     }
 
     fn parse_return_statement(&mut self) -> Option<Box<dyn Statement>> {
@@ -117,11 +123,13 @@ impl Parser {
 
         self.next_token();
 
-        while !self.current_token_is(&TokenType::Semicolon) {
+        let return_value = self.parse_expression(&Precedence::Lowest);
+
+        if self.peek_token_is(&TokenType::Semicolon) {
             self.next_token();
         }
 
-        Some(Box::new(ReturnStatement::new(current_token, None)))
+        Some(Box::new(ReturnStatement::new(current_token, return_value)))
     }
 
     fn parse_expression_statement(&mut self) -> Option<Box<dyn Statement>> {
@@ -212,6 +220,47 @@ impl Parser {
             left.clone(), current_token.literal.clone(), right.unwrap())))
     }
 
+    fn parse_call_expression(&mut self, function: Box<dyn Expression>) -> Option<Box<dyn Expression>> {
+        let current_token = self.current_token.clone();
+
+        let arguments = self.parse_call_arguments();
+
+        match arguments {
+            Some(arg) => Some(Box::new(CallExpression::new(current_token.clone(), function.clone(), arg))),
+            None => None,
+        }
+    }
+
+    fn parse_call_arguments(&mut self) -> Option<Vec<Box<dyn Expression>>> {
+        let mut args = vec![];
+
+        if self.peek_token_is(&TokenType::RParen) {
+            self.next_token();
+            return Some(args);
+        }
+
+        self.next_token();
+        match self.parse_expression(&Precedence::Lowest) {
+            Some(pe) => args.push(pe),
+            None => (),
+        };
+
+        while self.peek_token_is(&TokenType::Comma) {
+            self.next_token();
+            self.next_token();
+            match self.parse_expression(&Precedence::Lowest) {
+                Some(pe) => args.push(pe),
+                None => (),
+            };
+        }
+
+        if !self.expect_peek(&TokenType::RParen) {
+            return None;
+        }
+
+        Some(args)
+    }
+
     fn parse_identifier(&mut self) -> Option<Box<dyn Expression>> {
         Some(Box::new(Identifier::new(self.current_token.clone(), self.current_token.literal.clone())))
     }
@@ -279,6 +328,55 @@ impl Parser {
         }
     }
 
+    fn parse_function_literal(&mut self) -> Option<Box<dyn Expression>> {
+        let current_token = self.current_token.clone();
+
+        if !self.expect_peek(&TokenType::LParen) {
+            return None;
+        }
+
+        let parameters = self.parse_function_parameters();
+
+        if !self.expect_peek(&TokenType::LBrace) {
+            return None;
+        }
+
+        let body = self.parse_block_statement();
+
+        match (parameters, body) {
+            (Some(param), Some(b)) => Some(Box::new(FunctionLiteral::new(current_token, param, b))),
+            _ => None,
+        }
+    }
+
+    fn parse_function_parameters(&mut self) -> Option<Vec<Box<dyn Expression>>> {
+        let mut identifiers = vec![];
+
+        if self.peek_token_is(&TokenType::RParen) {
+            self.next_token();
+            return Some(identifiers);
+        }
+
+        self.next_token();
+
+        let mut identifier = Identifier::new(self.current_token.clone(), self.current_token.literal.clone());
+        identifiers.push(Box::new(identifier));
+
+        while self.peek_token_is(&TokenType::Comma) {
+            self.next_token();
+            self.next_token();
+
+            identifier = Identifier::new(self.current_token.clone(), self.current_token.literal.clone());
+            identifiers.push(Box::new(identifier));
+        }
+
+        if !self.expect_peek(&TokenType::RParen) {
+            return None;
+        }
+
+        Some(identifiers)
+    }
+
     fn current_token_is(&self, token_type: &TokenType) -> bool {
         self.current_token.token_type == *token_type
     }
@@ -313,11 +411,12 @@ impl Parser {
             TokenType::Lt | TokenType::Gt => Precedence::LessGreater,
             TokenType::Plus | TokenType::Minus => Precedence::Sum,
             TokenType::Slash | TokenType::Asterisk => Precedence::Product,
+            TokenType::LParen => Precedence::Call,
             _ => Precedence::Lowest,
         }
     }
 
-    fn get_errors(&self) -> Vec<String> {
+    pub fn get_errors(&self) -> Vec<String> {
         self.errors.clone()
     }
 
@@ -341,6 +440,7 @@ mod tests {
     enum ExpType {
         Int(i64),
         Bool(bool),
+        String(String),
     }
 
     trait ValueType {
@@ -373,37 +473,91 @@ mod tests {
 
     #[test]
     fn verify_let_statements_are_parsed() {
-        let input = String::from(r#"let x = 5;
-let y = 10;
-let foobar = 838383;"#);
-
-        let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer);
-
-        let program = parser.parse_program();
-        check_parser_errors(&parser);
-        match program.clone() {
-            Some(p) => assert_eq!(p.statements.len(), 3),
-            None => assert!(false, "parse_program() returned None."),
+        struct LetTest {
+            input: String,
+            expected_identifier: String,
+            expected_value: ExpType,
         };
 
-        let tests = vec![
-            String::from("x"),
-            String::from("y"),
-            String::from("foobar"),
+        let let_tests = vec![
+            LetTest { input: String::from("let x = 5;"), expected_identifier: String::from("x"), expected_value: ExpType::Int(5), },
+            LetTest { input: String::from("let y = true;"), expected_identifier: String::from("y"), expected_value: ExpType::Bool(true), },
+            LetTest { input: String::from("let foobar = y;"), expected_identifier: String::from("foobar"), expected_value: ExpType::String(String::from("y")), },
         ];
 
-        for (i, test) in tests.iter().enumerate() {
-            let stmt = program.clone().unwrap().statements[i].clone();
-            assert_eq!(stmt.clone().token_literal(), String::from("let"));
-            assert_eq!(stmt.clone().type_of(), "LetStatement");
-            assert_eq!(stmt.clone().get_name().value, *test);
-            assert_eq!(stmt.clone().get_name().token_literal(), *test);
+        for let_test in let_tests {
+            let lexer = Lexer::new(let_test.input);
+            let mut parser = Parser::new(lexer);
+
+            let program = parser.parse_program();
+            check_parser_errors(&parser);
+            match &program {
+                Some(p) => assert_eq!(p.statements.len(), 1),
+                None => assert!(false, "parse_program() returned None."),
+            };
+
+            let stmt = &program.unwrap().statements[0];
+            verify_let_statement(&stmt, &let_test.expected_identifier);
+            match stmt.as_any().downcast_ref::<LetStatement>() {
+                Some(s) => {
+                    match &s.value {
+                        Some(v) => { 
+                            match let_test.expected_value {
+                                ExpType::Int(ei) => verify_literal_expression(&v, ei),
+                                ExpType::String(es) => verify_literal_expression(&v, es),
+                                ExpType::Bool(eb) => verify_literal_expression(&v, eb),
+                            }
+                        },
+                        None => assert!(false, "Statement value was None."),
+                    };
+                }
+                None => assert!(false, "Statement is not of type LetStatement"),
+            }
         }
     }
 
     #[test]
     fn verify_return_statements_are_parsed() {
+        struct ReturnTest {
+            input: String,
+            expected_value: ExpType,
+        };
+
+        let return_tests = vec![
+            ReturnTest { input: String::from("return 5;"), expected_value: ExpType::Int(5), },
+            ReturnTest { input: String::from("return true;"), expected_value: ExpType::Bool(true), },
+            ReturnTest { input: String::from("return foobar;"), expected_value: ExpType::String(String::from("foobar")), },
+        ];
+
+        for return_test in return_tests {
+            let lexer = Lexer::new(return_test.input);
+            let mut parser = Parser::new(lexer);
+
+            let program = parser.parse_program();
+            check_parser_errors(&parser);
+            match &program {
+                Some(p) => assert_eq!(p.statements.len(), 1),
+                None => assert!(false, "parse_program() returned None."),
+            };
+
+            let stmt = &program.unwrap().statements[0];
+            match stmt.as_any().downcast_ref::<ReturnStatement>() {
+                Some(s) => {
+                    assert_eq!(s.token_literal(), "return");
+                    match &s.return_value {
+                        Some(r) => { 
+                            match return_test.expected_value {
+                                ExpType::Int(ei) => verify_literal_expression(&r, ei),
+                                ExpType::String(es) => verify_literal_expression(&r, es),
+                                ExpType::Bool(eb) => verify_literal_expression(&r, eb),
+                            }
+                        },
+                        None => assert!(false, "Statement value was None."),
+                    };
+                }
+                None => assert!(false, "Statement is not of type ReturnStatement"),
+            }
+        }
         let input = String::from(r#"return 5;
 return 10;
 return 993322;"#);
@@ -523,6 +677,7 @@ return 993322;"#);
                     match prefix_test.value {
                         ExpType::Int(iv) => verify_prefix_expression(&e, &prefix_test.operator, iv),
                         ExpType::Bool(bv) => verify_prefix_expression(&e, &prefix_test.operator, bv),
+                        ExpType::String(_) => (),
                     };
                 },
                 None => assert!(false, "Expression statement was not returned."),
@@ -607,6 +762,9 @@ return 993322;"#);
             OperatorTest { input: String::from("2 / (5 + 5)"), expected: String::from("(2 / (5 + 5))"), },
             OperatorTest { input: String::from("-(5 + 5)"), expected: String::from("(-(5 + 5))"), },
             OperatorTest { input: String::from("!(true == true)"), expected: String::from("(!(true == true))"), },
+            OperatorTest { input: String::from("a + add(b * c) + d"), expected: String::from("((a + add((b * c))) + d)"), },
+            OperatorTest { input: String::from("add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))"), expected: String::from("add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))"), },
+            OperatorTest { input: String::from("add(a + b + c * d / f + g)"), expected: String::from("add((((a + b) + ((c * d) / f)) + g))"), },
         ];
 
         for operator_test in operator_tests {
@@ -749,8 +907,162 @@ return 993322;"#);
         };
     }
 
+    #[test]
+    fn verify_function_literals_are_parsed() {
+        let input = String::from("fn(x, y) { x + y; }");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<FunctionLiteral>() {
+                    Some(func_lit) => {
+                        assert_eq!(func_lit.parameters.len(), 2);
+                        verify_literal_expression(&func_lit.parameters[0], String::from("x"));
+                        verify_literal_expression(&func_lit.parameters[1], String::from("y"));
+                        match func_lit.body.as_any().downcast_ref::<BlockStatement>() {
+                            Some(body) => {
+                                assert_eq!(body.statements.len(), 1);
+                                match body.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
+                                    Some(stmt_exp) => verify_infix_expression(&stmt_exp.expression.clone().unwrap(), String::from("x"), &String::from("+"), String::from("y")),
+                                    None => assert!(false, "Not an ExpressionStatement"),
+                                };
+                            },
+                            None => assert!(false, "Not a BlockStatement"),
+                        }
+                    },
+                    None => assert!(false, "Not a FunctionLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_function_parameters_are_parsed() {
+        struct ParamTest {
+            input: String,
+            expected_params: Vec<String>,
+        };
+
+        let param_tests = vec![
+            ParamTest { input: String::from("fn() {};"), expected_params: vec![] },
+            ParamTest { input: String::from("fn(x) {};"), expected_params: vec![String::from("x")] },
+            ParamTest { input: String::from("fn(x, y, z) {};"), expected_params: vec![
+                String::from("x"), String::from("y"), String::from("z")] },
+        ];
+
+        for param_test in param_tests {
+            let lexer = Lexer::new(param_test.input);
+            let mut parser = Parser::new(lexer);
+            let program = parser.parse_program();
+            check_parser_errors(&parser);
+
+            match &program {
+                Some(p) => assert_eq!(p.statements.len(), 1),
+                None => assert!(false, "parse_program() returned None."),
+            };
+
+            let stmt = &program.unwrap().statements[0];
+            match stmt.expression() {
+                Some(e) => {
+                    match e.as_any().downcast_ref::<FunctionLiteral>() {
+                        Some(func_lit) => {
+                            assert_eq!(func_lit.parameters.len(), param_test.expected_params.len());
+                            for (i, param) in param_test.expected_params.iter().enumerate() {
+                                verify_literal_expression(&func_lit.parameters[i], param.clone());
+                            }
+                        },
+                        None => assert!(false, "Not a FunctionLiteral")
+                    }
+                },
+                None => assert!(false, "Expression statement was not returned."),
+            };
+        }
+    }
+
+    #[test]
+    fn verify_call_expressions_are_parsed() {
+        let input = String::from("add(1, 2 * 3, 4 + 5);");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<CallExpression>() {
+                    Some(call_exp) => {
+                        verify_identifier(&call_exp.function, &String::from("add"));
+                        assert_eq!(call_exp.arguments.len(), 3);
+                        verify_literal_expression(&call_exp.arguments[0], 1);
+                        verify_infix_expression(&call_exp.arguments[1].clone(), 2, &String::from("*"), 3);
+                        verify_infix_expression(&call_exp.arguments[2].clone(), 4, &String::from("+"), 5);
+                    },
+                    None => assert!(false, "Not a CallExpression")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_call_expression_parameters_are_parsed() {
+        struct ArgTest {
+            input: String,
+            expected_ident: String,
+            expected_args: Vec<String>,
+        };
+
+        let arg_tests = vec![
+            ArgTest { input: String::from("add();"), expected_ident: String::from("add"), expected_args: vec![] },
+            ArgTest { input: String::from("add(1);"), expected_ident: String::from("add"), expected_args: vec![String::from("1")] },
+            ArgTest { input: String::from("add(1, 2 * 3, 4 + 5);"), expected_ident: String::from("add"), expected_args: vec![
+                String::from("1"), String::from("(2 * 3)"), String::from("(4 + 5)")] },
+        ];
+
+        for arg_test in arg_tests {
+            let lexer = Lexer::new(arg_test.input);
+            let mut parser = Parser::new(lexer);
+            let program = parser.parse_program();
+            check_parser_errors(&parser);
+
+            let stmt = &program.unwrap().statements[0];
+            match stmt.expression() {
+                Some(e) => {
+                    match e.as_any().downcast_ref::<CallExpression>() {
+                        Some(call_exp) => {
+                            verify_identifier(&call_exp.function, &arg_test.expected_ident);
+                            assert_eq!(call_exp.arguments.len(), arg_test.expected_args.len());
+                            for (i, arg) in arg_test.expected_args.iter().enumerate() {
+                                assert_eq!(&call_exp.arguments[i].to_string(), arg);
+                            }
+                        },
+                        None => assert!(false, "Not a CallExpression")
+                    }
+                },
+                None => assert!(false, "Expression statement was not returned."),
+            };
+        }
+    }
+
     fn verify_literal_expression<T>(expression: &Box<dyn Expression>, expected: T) where T: ValueType {
-        eprintln!("Expression type: {}", expected.get_type());
         match expected.get_type().as_str() {
             "i64" => verify_integer_literal(expression, expected.get_i64()),
             "String" => verify_identifier(expression, &expected.get_string()),
@@ -795,6 +1107,7 @@ return 993322;"#);
     fn verify_identifier(expression: &Box<dyn Expression>, value: &String) {
         match expression.as_any().downcast_ref::<Identifier>() {
             Some(e) => {
+                eprintln!("Value: {}", e.value);
                 assert_eq!(e.value, *value);
                 assert_eq!(e.token_literal(), *value);
             },
@@ -810,6 +1123,16 @@ return 993322;"#);
             },
             None => assert!(false, "Expression is not of type Boolean"),
         };
+    }
+
+    fn verify_let_statement(statement: &Box<dyn Statement>, name: &String) {
+        match statement.as_any().downcast_ref::<LetStatement>() {
+            Some(s) => {
+                assert_eq!(s.name.value, *name);
+                assert_eq!(s.name.token_literal(), *name);
+            }
+            None => assert!(false, "Statement is not of type LetStatement"),
+        }
     }
 
     fn check_parser_errors(parser: &Parser) {

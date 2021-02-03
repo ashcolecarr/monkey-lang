@@ -1,8 +1,20 @@
-use super::lexer::Lexer;
-use super::token::TokenType;
+use super::lexer::Lexer; 
+use super::parser::Parser;
 use std::io::{stdin, stdout, Write};
 
-pub const PROMPT: &str = ">> ";
+const PROMPT: &str = ">> ";
+const MONKEY_FACE: &str = r#"           __,__
+  .--.  .-"     "-.  .--.
+ / .. \/  .-. .-.  \/ .. \
+| |  '|  /   Y   \  |'  | |
+| \   \  \ 0 | 0 /  /   / |
+ \ '- ,\.-"""""""-./, -' /
+  ''-' /_   ^ ^   _\ '-''
+      |  \._   _./  |
+      \   \ '~' /   /
+       '._ '-=-' _.'
+          '-----'
+"#;
 
 pub fn start() {
     let mut line = String::new();
@@ -16,19 +28,33 @@ pub fn start() {
                     break;
                 }
 
-                let mut lexer = Lexer::new(line.clone());
+                let lexer = Lexer::new(line.clone());
 
-                loop {
-                    let token = lexer.next_token();
-                    if token.token_type == TokenType::Eof {
-                        break;
-                    }
-
-                    println!("{}", token);
+                let mut parser = Parser::new(lexer);
+                let program = parser.parse_program();
+                let errors = parser.get_errors();
+                if errors.len() > 0 {
+                    print_parser_errors(&errors);
+                    line.clear();
+                    continue;
                 }
+
+                match program {
+                    Some(p) => println!("{}", p.to_string()),
+                    None => (),
+                };
             },
             Err(e) => eprintln!("Error: {}", e),
         };
         line.clear();
+    }
+}
+
+fn print_parser_errors(errors: &Vec<String>) {
+    eprintln!("{}", MONKEY_FACE);
+    eprintln!("Woops! We ran into some monkey business here!");
+    eprintln!(" Parser errors:");
+    for error in errors {
+        eprintln!("\t{}", error);
     }
 }

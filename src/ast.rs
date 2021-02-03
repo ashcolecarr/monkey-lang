@@ -438,6 +438,78 @@ impl Expression for IfExpression {
 }
 
 #[derive(Clone)]
+pub struct FunctionLiteral {
+    pub token: Token,
+    pub parameters: Vec<Box<dyn Expression>>,
+    pub body: Box<dyn Statement>,
+}
+
+impl FunctionLiteral {
+    pub fn new(token: Token, parameters: Vec<Box<dyn Expression>>, body: Box<dyn Statement>) -> Self {
+        Self { token, parameters, body }
+    }
+}
+
+impl Expression for FunctionLiteral {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        String::new()
+    }
+
+    fn to_string(&self) -> String {
+        let params: Vec<String> = self.parameters.iter().map(|p| p.to_string()).collect();
+        format!("({}) {}", params.join(", "), self.body.to_string())
+    }
+
+    fn type_of(&self) -> &'static str {
+        "FunctionLiteral"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct CallExpression {
+    pub token: Token,
+    pub function: Box<dyn Expression>,
+    pub arguments: Vec<Box<dyn Expression>>,
+}
+
+impl CallExpression {
+    pub fn new(token: Token, function: Box<dyn Expression>, arguments: Vec<Box<dyn Expression>>) -> Self {
+        Self { token, function, arguments }
+    }
+}
+
+impl Expression for CallExpression {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn value(&self) -> String {
+        String::new()
+    }
+
+    fn to_string(&self) -> String {
+        let args: Vec<String> = self.arguments.iter().map(|a| a.to_string()).collect();
+        format!("{}({})", self.function.to_string(), args.join(", "))
+    }
+
+    fn type_of(&self) -> &'static str {
+        "CallExpression"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
 pub struct Program {
     pub statements: Vec<Box<dyn Statement>>,
 }
