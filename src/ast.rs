@@ -1,52 +1,66 @@
 use super::token::Token;
 use std::any::Any;
 
-pub trait Statement: StatementClone {
+pub trait Node: NodeClone {
     fn token_literal(&self) -> String;
     fn to_string(&self) -> String;
-    fn get_name(&self) -> Identifier;
     fn type_of(&self) -> &'static str;
     fn as_any(&self) -> &dyn Any;
+}
+
+pub trait NodeClone {
+    fn clone_box(&self) -> Box<dyn Node>;
+}
+
+impl <T: 'static + Node + Clone> NodeClone for T {
+    fn clone_box(&self) -> Box<dyn Node> {
+        Box::new(self.clone())
+    }
+}
+
+impl Clone for Box<dyn Node> {
+    fn clone(&self) -> Box<dyn Node> {
+        self.clone_box()
+    }
+}
+
+pub trait Statement: Node + StatementClone {
     fn expression(&self) -> Option<Box<dyn Expression>>;
 }
 
 pub trait StatementClone {
-    fn clone_box(&self) -> Box<dyn Statement>;
+    fn clone_stmt_box(&self) -> Box<dyn Statement>;
 }
 
 impl <T: 'static + Statement + Clone> StatementClone for T {
-    fn clone_box(&self) -> Box<dyn Statement> {
+    fn clone_stmt_box(&self) -> Box<dyn Statement> {
         Box::new(self.clone())
     }
 }
 
 impl Clone for Box<dyn Statement> {
     fn clone(&self) -> Box<dyn Statement> {
-        self.clone_box()
+        self.clone_stmt_box()
     }
 }
 
-pub trait Expression: ExpressionClone {
-    fn token_literal(&self) -> String;
+pub trait Expression: Node + ExpressionClone {
     fn value(&self) -> String;
-    fn to_string(&self) -> String;
-    fn type_of(&self) -> &'static str;
-    fn as_any(&self) -> &dyn Any;
 }
 
 pub trait ExpressionClone {
-    fn clone_box(&self) -> Box<dyn Expression>;
+    fn clone_exp_box(&self) -> Box<dyn Expression>;
 }
 
 impl <T: 'static + Expression + Clone> ExpressionClone for T {
-    fn clone_box(&self) -> Box<dyn Expression> {
+    fn clone_exp_box(&self) -> Box<dyn Expression> {
         Box::new(self.clone())
     }
 }
 
 impl Clone for Box<dyn Expression> {
     fn clone(&self) -> Box<dyn Expression> {
-        self.clone_box()
+        self.clone_exp_box()
     }
 }
 
@@ -63,7 +77,7 @@ impl LetStatement {
     }
 }
 
-impl Statement for LetStatement {
+impl Node for LetStatement {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
     }
@@ -79,10 +93,6 @@ impl Statement for LetStatement {
         return_string
     }
 
-    fn get_name(&self) -> Identifier {
-        self.name.clone()
-    }
-
     fn type_of(&self) -> &'static str {
         "LetStatement"
     }
@@ -90,7 +100,9 @@ impl Statement for LetStatement {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
 
+impl Statement for LetStatement {
     fn expression(&self) -> Option<Box<dyn Expression>> {
         self.value.clone()
     }
@@ -108,7 +120,7 @@ impl ReturnStatement {
     }
 }
 
-impl Statement for ReturnStatement {
+impl Node for ReturnStatement {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
     }
@@ -123,10 +135,6 @@ impl Statement for ReturnStatement {
         return_string
     }
 
-    fn get_name(&self) -> Identifier {
-        Identifier::new(self.token.clone(), String::new())
-    }
-
     fn type_of(&self) -> &'static str {
         "ReturnStatement"
     }
@@ -134,7 +142,9 @@ impl Statement for ReturnStatement {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
 
+impl Statement for ReturnStatement {
     fn expression(&self) -> Option<Box<dyn Expression>> {
         self.return_value.clone()
     }
@@ -152,7 +162,7 @@ impl BlockStatement {
     }
 }
 
-impl Statement for BlockStatement {
+impl Node for BlockStatement {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
     }
@@ -166,10 +176,6 @@ impl Statement for BlockStatement {
         return_string
     }
 
-    fn get_name(&self) -> Identifier {
-        Identifier::new(self.token.clone(), String::new())
-    }
-
     fn type_of(&self) -> &'static str {
         "BlockStatement"
     }
@@ -177,7 +183,9 @@ impl Statement for BlockStatement {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
 
+impl Statement for BlockStatement {
     fn expression(&self) -> Option<Box<dyn Expression>> {
         None
     }
@@ -195,7 +203,7 @@ impl ExpressionStatement {
     }
 }
 
-impl Statement for ExpressionStatement {
+impl Node for ExpressionStatement {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
     }
@@ -206,10 +214,6 @@ impl Statement for ExpressionStatement {
             .map(|v| v.to_string()).unwrap_or_else(String::new)
     }
 
-    fn get_name(&self) -> Identifier {
-        Identifier::new(self.token.clone(), self.token_literal())
-    }
-
     fn type_of(&self) -> &'static str {
         "ExpressionStatement"
     }
@@ -217,7 +221,9 @@ impl Statement for ExpressionStatement {
     fn as_any(&self) -> &dyn Any {
         self
     }
+}
 
+impl Statement for ExpressionStatement {
     fn expression(&self) -> Option<Box<dyn Expression>> {
         self.expression.clone()
     }
@@ -235,13 +241,9 @@ impl Identifier {
     }
 }
 
-impl Expression for Identifier {
+impl Node for Identifier {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        self.value.clone()
     }
 
     fn to_string(&self) -> String {
@@ -257,6 +259,12 @@ impl Expression for Identifier {
     }
 }
 
+impl Expression for Identifier {
+    fn value(&self) -> String {
+        self.value.clone()
+    }
+}
+
 #[derive(Clone)]
 pub struct IntegerLiteral {
     pub token: Token,
@@ -269,13 +277,9 @@ impl IntegerLiteral {
     }
 }
 
-impl Expression for IntegerLiteral {
+impl Node for IntegerLiteral {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        self.value.to_string()
     }
 
     fn to_string(&self) -> String {
@@ -291,6 +295,12 @@ impl Expression for IntegerLiteral {
     }
 }
 
+impl Expression for IntegerLiteral {
+    fn value(&self) -> String {
+        self.value.to_string()
+    }
+}
+
 #[derive(Clone)]
 pub struct Boolean {
     pub token: Token,
@@ -303,13 +313,9 @@ impl Boolean {
     }
 }
 
-impl Expression for Boolean {
+impl Node for Boolean {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        self.value.to_string()
     }
 
     fn to_string(&self) -> String {
@@ -322,6 +328,12 @@ impl Expression for Boolean {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+impl Expression for Boolean {
+    fn value(&self) -> String {
+        self.value.to_string()
     }
 }
 
@@ -338,13 +350,9 @@ impl PrefixExpression {
     }
 }
 
-impl Expression for PrefixExpression {
+impl Node for PrefixExpression {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        String::new()
     }
 
     fn to_string(&self) -> String {
@@ -357,6 +365,12 @@ impl Expression for PrefixExpression {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+impl Expression for PrefixExpression {
+    fn value(&self) -> String {
+        String::new()
     }
 }
 
@@ -374,13 +388,9 @@ impl InfixExpression {
     }
 }
 
-impl Expression for InfixExpression {
+impl Node for InfixExpression {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        String::new()
     }
 
     fn to_string(&self) -> String {
@@ -394,6 +404,12 @@ impl Expression for InfixExpression {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+impl Expression for InfixExpression {
+    fn value(&self) -> String {
+        String::new()
     }
 }
 
@@ -411,13 +427,9 @@ impl IfExpression {
     }
 }
 
-impl Expression for IfExpression {
+impl Node for IfExpression {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        String::new()
     }
 
     fn to_string(&self) -> String {
@@ -437,6 +449,12 @@ impl Expression for IfExpression {
     }
 }
 
+impl Expression for IfExpression {
+    fn value(&self) -> String {
+        String::new()
+    }
+}
+
 #[derive(Clone)]
 pub struct FunctionLiteral {
     pub token: Token,
@@ -450,13 +468,9 @@ impl FunctionLiteral {
     }
 }
 
-impl Expression for FunctionLiteral {
+impl Node for FunctionLiteral {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        String::new()
     }
 
     fn to_string(&self) -> String {
@@ -473,6 +487,12 @@ impl Expression for FunctionLiteral {
     }
 }
 
+impl Expression for FunctionLiteral {
+    fn value(&self) -> String {
+        String::new()
+    }
+}
+
 #[derive(Clone)]
 pub struct CallExpression {
     pub token: Token,
@@ -486,13 +506,9 @@ impl CallExpression {
     }
 }
 
-impl Expression for CallExpression {
+impl Node for CallExpression {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
-    }
-
-    fn value(&self) -> String {
-        String::new()
     }
 
     fn to_string(&self) -> String {
@@ -509,17 +525,19 @@ impl Expression for CallExpression {
     }
 }
 
+impl Expression for CallExpression {
+    fn value(&self) -> String {
+        String::new()
+    }
+}
+
 #[derive(Clone)]
 pub struct Program {
     pub statements: Vec<Box<dyn Statement>>,
 }
 
-impl Program {
-    pub fn new() -> Self {
-        Self { statements: vec![] }
-    }
-
-    pub fn token_literal(&self) -> String {
+impl Node for Program {
+    fn token_literal(&self) -> String {
         if self.statements.len() > 0 {
             self.statements[0].token_literal()
         } else {
@@ -527,7 +545,7 @@ impl Program {
         }
     }
 
-    pub fn to_string(&self) -> String {
+    fn to_string(&self) -> String {
         let mut return_string = String::new();
 
         for statement in &self.statements {
@@ -535,6 +553,20 @@ impl Program {
         }
 
         return_string
+    }
+
+    fn type_of(&self) -> &'static str {
+        "Program"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Program {
+    pub fn new() -> Self {
+        Self { statements: vec![] }
     }
 }
 
