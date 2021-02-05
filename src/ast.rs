@@ -1,7 +1,7 @@
 use super::token::Token;
 use std::any::Any;
 
-pub trait Node: NodeClone {
+pub trait Node: NodeClone + BaseTrait {
     fn token_literal(&self) -> String;
     fn to_string(&self) -> String;
     fn type_of(&self) -> &'static str;
@@ -21,6 +21,16 @@ impl <T: 'static + Node + Clone> NodeClone for T {
 impl Clone for Box<dyn Node> {
     fn clone(&self) -> Box<dyn Node> {
         self.clone_box()
+    }
+}
+
+pub trait BaseTrait {
+    fn as_base(&self) -> &dyn Node;
+}
+
+impl<T: Node> BaseTrait for T {
+    fn as_base(&self) -> &dyn Node {
+        self
     }
 }
 
