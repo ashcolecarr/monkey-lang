@@ -1,21 +1,10 @@
-use super::ast::Node;
+use super::ast::BaseTrait;
+use super::evaluator::*;
 use super::lexer::Lexer; 
 use super::parser::Parser;
+use super::MONKEY_FACE;
+use super::PROMPT;
 use std::io::{stdin, stdout, Write};
-
-const PROMPT: &str = ">> ";
-const MONKEY_FACE: &str = r#"           __,__
-  .--.  .-"     "-.  .--.
- / .. \/  .-. .-.  \/ .. \
-| |  '|  /   Y   \  |'  | |
-| \   \  \ 0 | 0 /  /   / |
- \ '- ,\.-"""""""-./, -' /
-  ''-' /_   ^ ^   _\ '-''
-      |  \._   _./  |
-      \   \ '~' /   /
-       '._ '-=-' _.'
-          '-----'
-"#;
 
 pub fn start() {
     let mut line = String::new();
@@ -40,8 +29,14 @@ pub fn start() {
                     continue;
                 }
 
-                match program {
-                    Some(p) => println!("{}", p.to_string()),
+                match &program {
+                    Some(p) => {
+                        let evaluated = eval(Box::new(p.as_base()));
+                        match evaluated {
+                            Some(eval) => println!("{}", eval.inspect()),
+                            None => ()
+                        };
+                    },
                     None => (),
                 };
             },

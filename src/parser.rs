@@ -278,7 +278,7 @@ impl Parser {
     }
 
     fn parse_boolean(&mut self) -> Option<Box<dyn Expression>> {
-        Some(Box::new(Boolean::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
+        Some(Box::new(BooleanLiteral::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
     }
 
     fn parse_grouped_expression(&mut self) -> Option<Box<dyn Expression>> {
@@ -800,7 +800,7 @@ return 993322;"#);
         let stmt = &program.unwrap().statements[0];
         match stmt.expression() {
             Some(e) => {
-                match e.as_any().downcast_ref::<Boolean>() {
+                match e.as_any().downcast_ref::<BooleanLiteral>() {
                     Some(boolean) => {
                         assert_eq!(boolean.value, true);
                         assert_eq!(boolean.token_literal(), true.to_string());
@@ -1116,7 +1116,7 @@ return 993322;"#);
     }
 
     fn verify_boolean_literal(expression: &Box<dyn Expression>, value: bool) {
-        match expression.as_any().downcast_ref::<Boolean>() {
+        match expression.as_any().downcast_ref::<BooleanLiteral>() {
             Some(e) => {
                 assert_eq!(e.value, value);
                 assert_eq!(e.token_literal(), value.to_string());

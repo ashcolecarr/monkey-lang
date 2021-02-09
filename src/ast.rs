@@ -312,18 +312,18 @@ impl Expression for IntegerLiteral {
 }
 
 #[derive(Clone)]
-pub struct Boolean {
+pub struct BooleanLiteral {
     pub token: Token,
     pub value: bool,
 }
 
-impl Boolean {
+impl BooleanLiteral {
     pub fn new(token: Token, value: bool) -> Self {
-        Self { token, value }
+        BooleanLiteral { token, value }
     }
 }
 
-impl Node for Boolean {
+impl Node for BooleanLiteral {
     fn token_literal(&self) -> String {
         self.token.literal.clone()
     }
@@ -341,7 +341,7 @@ impl Node for Boolean {
     }
 }
 
-impl Expression for Boolean {
+impl Expression for BooleanLiteral {
     fn value(&self) -> String {
         self.value.to_string()
     }
