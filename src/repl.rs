@@ -1,4 +1,5 @@
 use super::ast::BaseTrait;
+use super::environment::Environment;
 use super::evaluator::*;
 use super::lexer::Lexer; 
 use super::parser::Parser;
@@ -8,6 +9,7 @@ use std::io::{stdin, stdout, Write};
 
 pub fn start() {
     let mut line = String::new();
+    let mut env = Environment::new();
     loop {
         print!("{}", PROMPT);
         stdout().flush().expect("Output could not be written.");
@@ -31,11 +33,8 @@ pub fn start() {
 
                 match &program {
                     Some(p) => {
-                        let evaluated = eval(Box::new(p.as_base()));
-                        match evaluated {
-                            Some(eval) => println!("{}", eval.inspect()),
-                            None => ()
-                        };
+                        let evaluated = eval(Box::new(p.as_base()), &mut env);
+                        println!("{}", evaluated.inspect());
                     },
                     None => (),
                 };

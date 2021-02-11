@@ -4,6 +4,7 @@ pub const INTEGER_OBJ: &str = "INTEGER";
 pub const BOOLEAN_OBJ: &str = "BOOLEAN";
 pub const NULL_OBJ: &str = "NULL";
 pub const RETURN_VALUE_OBJ: &str = "RETURN_VALUE";
+pub const ERROR_OBJ: &str = "ERROR";
 
 type ObjectType = String;
 
@@ -120,6 +121,31 @@ impl Object for ReturnValue {
 
     fn inspect(&self) -> String {
         format!("{}", self.value.inspect())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct Error {
+    pub message: String,
+}
+
+impl Error {
+    pub fn new(message: String) -> Self {
+        Self { message }
+    }
+}
+
+impl Object for Error {
+    fn type_of(&self) -> ObjectType {
+        ERROR_OBJ.to_string()
+    }
+
+    fn inspect(&self) -> String {
+        format!("Error: {}", self.message)
     }
 
     fn as_any(&self) -> &dyn Any {
