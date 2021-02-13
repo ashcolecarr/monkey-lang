@@ -1,8 +1,10 @@
 use super::ast::*;
 use super::environment::Environment;
 use super::object::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
-pub fn eval(node: Box<&dyn Node>, env: &mut Environment) -> Box<dyn Object> {
+pub fn eval(node: Box<&dyn Node>, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
     match node.type_of() {
         // Statements
         "Program" => {
@@ -50,11 +52,11 @@ pub fn eval(node: Box<&dyn Node>, env: &mut Environment) -> Box<dyn Object> {
                 Some(ls) => {
                     match &ls.value {
                         Some(v) => {
-                            let val = eval(Box::new(v.clone().as_base()), env);
+                            let val = eval(Box::new(v.clone().as_base()), Rc::clone(&env));
                             if is_error(&val) {
                                 return val;
                             }
-                            env.set(ls.name.value.clone(), val)
+                            env.borrow_mut().set(ls.name.value.clone(), val)
                         },
                         None => Box::new(Null::new()),
                     }
@@ -90,11 +92,11 @@ pub fn eval(node: Box<&dyn Node>, env: &mut Environment) -> Box<dyn Object> {
         "InfixExpression" => {
             match node.as_any().downcast_ref::<InfixExpression>() {
                 Some(ie) => {
-                    let left = eval(Box::new(ie.left.as_base()), env);
+                    let left = eval(Box::new(ie.left.as_base()), Rc::clone(&env));
                     if is_error(&left) {
                         return left;
                     }
-                    let right = eval(Box::new(ie.right.as_base()), env);
+                    let right = eval(Box::new(ie.right.as_base()), Rc::clone(&env));
                     if is_error(&right) {
                         return right;
                     }
@@ -114,16 +116,40 @@ pub fn eval(node: Box<&dyn Node>, env: &mut Environment) -> Box<dyn Object> {
                 Some(i) => eval_identifier(&i, env),
                 None => new_error(format!("type error: expected {}", node.type_of())),
             }
-        }
+        },
+        "FunctionLiteral" => {
+            match node.as_any().downcast_ref::<FunctionLiteral>() {
+                Some(fl) => Box::new(Function::new(fl.parameters.clone(), fl.body.clone(), Rc::clone(&env))),
+                None => new_error(format!("type error: expected {}", node.type_of())),
+            }
+        },
+        "CallExpression" => {
+            match node.as_any().downcast_ref::<CallExpression>() {
+                Some(ce) => {
+                    let function = eval(Box::new(ce.function.as_base()), Rc::clone(&env));
+                    if is_error(&function) {
+                        return function;
+                    }
+                    
+                    let args = eval_expressions(&ce.arguments, Rc::clone(&env));
+                    if args.len() == 1 && is_error(&args[0]) {
+                        return args[0].clone();
+                    }
+
+                    apply_function(function, args)
+                },
+                None => new_error(format!("type error: expected {}", node.type_of())),
+            }
+        },
         _ => new_error(String::from("type error: type not found")),
     }
 }
 
-fn eval_program(program: &Program, env: &mut Environment) -> Box<dyn Object> {
+fn eval_program(program: &Program, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
     let mut result: Box<dyn Object> = Box::new(Null::new());
 
     for statement in &program.statements {
-        result = eval(Box::new(statement.as_base()), env);
+        result = eval(Box::new(statement.as_base()), Rc::clone(&env));
 
         match result.as_any().downcast_ref::<ReturnValue>() {
             Some(res) => return res.value.clone(),
@@ -139,11 +165,11 @@ fn eval_program(program: &Program, env: &mut Environment) -> Box<dyn Object> {
     result
 }
 
-fn eval_block_statement(block: &BlockStatement, env: &mut Environment) -> Box<dyn Object> {
+fn eval_block_statement(block: &BlockStatement, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
     let mut result: Box<dyn Object> = Box::new(Null::new());
 
     for statement in &block.statements {
-        result = eval(Box::new(statement.as_base()), env);
+        result = eval(Box::new(statement.as_base()), Rc::clone(&env));
 
         match result.type_of().as_str() {
             RETURN_VALUE_OBJ | ERROR_OBJ => return result,
@@ -240,14 +266,14 @@ fn eval_boolean_infix_expression(operator: &String, left: Box<dyn Object>, right
     }
 }
 
-fn eval_if_expression(if_expression: &IfExpression, env: &mut Environment) -> Box<dyn Object> {
-    let condition = eval(Box::new(if_expression.condition.as_base()), env); 
+fn eval_if_expression(if_expression: &IfExpression, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
+    let condition = eval(Box::new(if_expression.condition.as_base()), Rc::clone(&env)); 
     if is_error(&condition) {
         return condition;
     }
 
     if is_truthy(condition) {
-        return eval(Box::new(if_expression.consequence.as_base()), env);
+        return eval(Box::new(if_expression.consequence.as_base()), Rc::clone(&env));
     }
 
     match &if_expression.alternative {
@@ -256,6 +282,58 @@ fn eval_if_expression(if_expression: &IfExpression, env: &mut Environment) -> Bo
     }
 
     Box::new(Null::new())
+}
+
+fn eval_identifier(identifier: &Identifier, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
+    let val = env.borrow().get(&identifier.value);
+    match val {
+        Some(v) => v,
+        None => new_error(format!("identifier not found: {}", identifier.value.clone())),
+    }
+}
+
+fn eval_expressions(exps: &Vec<Box<dyn Expression>>, env: Rc<RefCell<Environment>>) -> Vec<Box<dyn Object>> {
+    let mut result = vec![];
+
+    for exp in exps {
+        let evaluated = eval(Box::new(exp.as_base()), Rc::clone(&env));
+        if is_error(&evaluated) {
+            return vec![evaluated];
+        }
+
+        result.push(evaluated);
+    }
+
+    result
+}
+
+fn apply_function(fun: Box<dyn Object>, args: Vec<Box<dyn Object>>) -> Box<dyn Object> {
+    match fun.as_any().downcast_ref::<Function>() {
+        Some(f) => {
+            let extended_env = extend_function_env(&f, args);
+            let evaluated = eval(Box::new(f.body.as_base()), Rc::new(RefCell::new(extended_env)));
+
+            unwrap_return_value(evaluated)
+        },
+        None => new_error(format!("not a function: {}", fun.type_of())),
+    }
+}
+
+fn extend_function_env(fun: &Function, args: Vec<Box<dyn Object>>) -> Environment {
+    let mut env = Environment::new_enclosed(Rc::clone(&fun.env));
+
+    for (i, param) in fun.parameters.iter().enumerate() {
+        env.set(param.value(), args[i].clone());
+    }
+
+    env
+}
+
+fn unwrap_return_value(obj: Box<dyn Object>) -> Box<dyn Object> {
+    match obj.as_any().downcast_ref::<ReturnValue>() {
+        Some(rv) => rv.value.clone(),
+        None => obj,
+    }
 }
 
 fn is_truthy(obj: Box<dyn Object>) -> bool {
@@ -268,14 +346,6 @@ fn is_truthy(obj: Box<dyn Object>) -> bool {
             }
         },
         _ => true,
-    }
-}
-
-fn eval_identifier(identifier: &Identifier, env: &Environment) -> Box<dyn Object> {
-    let val = env.get(identifier.value.clone());
-    match val {
-        Some(v) => v,
-        None => new_error(format!("identifier not found: {}", identifier.value.clone())),
     }
 }
 
@@ -517,14 +587,77 @@ mod tests {
         }
     }
 
+    #[test]
+    fn verify_function_objects_are_evaluated() {
+        let input = String::from("fn(x) { x + 2; };");
+        let expected_body = String::from("(x + 2)");
+
+        let evaluated = get_eval(&input);
+        match evaluated {
+            Some(eval) => {
+                match eval.as_any().downcast_ref::<Function>() {
+                    Some(e) => {
+                        assert_eq!(e.parameters.len(), 1);
+                        assert_eq!(e.parameters[0].to_string(), String::from("x"));                            
+                        assert_eq!(e.body.to_string(), expected_body);
+                    },
+                    None => assert!(false, "Object is not a function."),
+                }
+            },
+            None => assert!(false, "Function object could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn verify_functions_are_applied() {
+        struct FunctionTest {
+            input: String,
+            expected: i64,
+        };
+
+        let function_tests = vec![
+            FunctionTest { input: String::from("let identity = fn(x) { x; }; identity(5);"), expected: 5 },
+            FunctionTest { input: String::from("let identity = fn(x) { return x; }; identity(5);"), expected: 5 },
+            FunctionTest { input: String::from("let double = fn(x) { x * 2; }; double(5);"), expected: 10 },
+            FunctionTest { input: String::from("let add = fn(x, y) { x + y; }; add(5, 5);"), expected: 10 },
+            FunctionTest { input: String::from("let add = fn(x, y) { x + y; }; add(5 + 5, add(5, 5));"), expected: 20 },
+            FunctionTest { input: String::from("fn(x) { x; }(5)"), expected: 5 },
+        ];
+
+        for function_test in function_tests {
+            let evaluated = get_eval(&function_test.input);
+            match evaluated {
+                Some(eval) => verify_integer_object(&eval, function_test.expected),
+                None => assert!(false, "Integer expression could not be evaluated."),
+            }
+        }
+    }
+
+    #[test]
+    fn verify_closures_are_evaluated() {
+        let input = String::from(r#"
+let newAdder = fn(x) {
+  fn(y) { x + y };
+};
+
+let addTwo = newAdder(2);
+addTwo(2);"#);
+
+        let evaluated = get_eval(&input);
+        match evaluated {
+            Some(eval) => verify_integer_object(&eval, 4),
+            None => assert!(false, "Function object could not be evaluated."),
+        }
+    }
+
     fn get_eval(input: &String) -> Option<Box<dyn Object>> {
         let lexer = Lexer::new(input.clone());
         let mut parser = Parser::new(lexer);
         let program = parser.parse_program();
-        let mut env = Environment::new();
+        let env = Rc::new(RefCell::new(Environment::new()));
 
         match &program {
-            Some(p) => Some(eval(Box::new(p), &mut env)),
+            Some(p) => Some(eval(Box::new(p), env)),
             None => {
                 assert!(false, "parse_program returned None.");
                 None

@@ -5,11 +5,13 @@ use super::lexer::Lexer;
 use super::parser::Parser;
 use super::MONKEY_FACE;
 use super::PROMPT;
+use std::cell::RefCell;
 use std::io::{stdin, stdout, Write};
+use std::rc::Rc;
 
 pub fn start() {
     let mut line = String::new();
-    let mut env = Environment::new();
+    let env = Rc::new(RefCell::new(Environment::new()));
     loop {
         print!("{}", PROMPT);
         stdout().flush().expect("Output could not be written.");
@@ -33,7 +35,7 @@ pub fn start() {
 
                 match &program {
                     Some(p) => {
-                        let evaluated = eval(Box::new(p.as_base()), &mut env);
+                        let evaluated = eval(Box::new(p.as_base()), Rc::clone(&env));
                         println!("{}", evaluated.inspect());
                     },
                     None => (),

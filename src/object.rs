@@ -1,10 +1,15 @@
+use super::ast::*;
+use super::environment::Environment;
 use std::any::Any;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub const INTEGER_OBJ: &str = "INTEGER";
 pub const BOOLEAN_OBJ: &str = "BOOLEAN";
 pub const NULL_OBJ: &str = "NULL";
 pub const RETURN_VALUE_OBJ: &str = "RETURN_VALUE";
 pub const ERROR_OBJ: &str = "ERROR";
+pub const FUNCION_OBJ: &str = "FUNCTION";
 
 type ObjectType = String;
 
@@ -149,6 +154,34 @@ impl Object for Error {
     }
 
     fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct Function {
+    pub parameters: Vec<Box<dyn Expression>>,
+    pub body: Box<dyn Statement>,
+    pub env: Rc<RefCell<Environment>>,
+}
+
+impl Function {
+    pub fn new(parameters: Vec<Box<dyn Expression>>, body: Box<dyn Statement>, env: Rc<RefCell<Environment>>) -> Self {
+        Self { parameters, body, env }
+    }
+}
+
+impl Object for Function {
+    fn type_of(&self) -> ObjectType {
+        FUNCION_OBJ.to_string()
+    }
+
+    fn inspect(&self) -> String {
+        let params: Vec<String> = self.parameters.iter().map(|p| p.to_string()).collect();
+        format!("fn({}) {{\n{}\n}}", params.join(", "), self.body.to_string())
+    }
+
+    fn as_any(&self) -> &dyn Any where dyn Object: 'static {
         self
     }
 }
