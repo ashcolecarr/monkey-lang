@@ -65,6 +65,17 @@ impl Lexer {
             ')' => TokenType::RParen,
             '{' => TokenType::LBrace,
             '}' => TokenType::RBrace,
+            '"' => {
+                match self.read_string() {
+                    Some(s) => {
+                        literal = s;
+                        TokenType::String
+                    },
+                    None => TokenType::Illegal,
+                }
+            },
+            '[' => TokenType::LBracket,
+            ']' => TokenType::RBracket,
             '\0' => TokenType::Eof,
             _ => {
                 if self.is_letter() {
@@ -82,7 +93,7 @@ impl Lexer {
         };
 
         // Exit early here since the identifier's characters are already consumed.
-        if !literal.is_empty() {
+        if !literal.is_empty() || token_type == TokenType::String {
             return Token::new(token_type, literal);
         }
 
@@ -122,6 +133,44 @@ impl Lexer {
         self.input[position..self.position].iter().collect()
     }
 
+    fn read_string(&mut self) -> Option<String> {
+        let mut output = String::new();
+        loop {
+            self.read_char();
+            match self.ch {
+                '"' => {
+                    self.read_char();
+                    break
+                },
+                '\\' => {
+                    // Capture an escaped character.
+                    match self.peek_char() {
+                        '"' => {
+                            output.push('"');
+                            self.read_char();
+                        },
+                        't' => {
+                            output.push('\t');
+                            self.read_char();
+                        },
+                        'n' => {
+                            output.push('\n');
+                            self.read_char();
+                        },
+                        _ => (),
+                    };
+                    continue;
+                }
+                '\0' => return None,
+                _ => (),
+            };
+
+            output.push(self.ch);
+        }
+
+        Some(output)
+    }
+
     fn is_letter(&self) -> bool {
         'a' <= self.ch && self.ch <= 'z' || 'A' <= self.ch && self.ch <= 'Z' || self.ch == '_'
     }
@@ -151,7 +200,7 @@ impl Lexer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::token::{Token, TokenType};
+    use super::super::token::TokenType;
 
     #[test]
     fn verifying_next_token_returns_token() {
@@ -173,91 +222,113 @@ if (5 < 10) {
 }
 
 10 == 10;
-10 != 9;"#);
+10 != 9;
+"foobar"
+"foo bar"
+"hello \"world\""
+"hello\n world"
+"hello\t\t\tworld"
+[1, 2];"#);
 
-        let tests = vec![
-            Token::new(TokenType::Let, String::from("let")), 
-            Token::new(TokenType::Ident, String::from("five")),
-            Token::new(TokenType::Assign, String::from("=")),
-            Token::new(TokenType::Int, String::from("5")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Let, String::from("let")),
-            Token::new(TokenType::Ident, String::from("ten")),
-            Token::new(TokenType::Assign, String::from("=")),
-            Token::new(TokenType::Int, String::from("10")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Let, String::from("let")),
-            Token::new(TokenType::Ident, String::from("add")),
-            Token::new(TokenType::Assign, String::from("=")),
-            Token::new(TokenType::Function, String::from("fn")),
-            Token::new(TokenType::LParen, String::from("(")),
-            Token::new(TokenType::Ident, String::from("x")),
-            Token::new(TokenType::Comma, String::from(",")),
-            Token::new(TokenType::Ident, String::from("y")),
-            Token::new(TokenType::RParen, String::from(")")),
-            Token::new(TokenType::LBrace, String::from("{")),
-            Token::new(TokenType::Ident, String::from("x")),
-            Token::new(TokenType::Plus, String::from("+")),
-            Token::new(TokenType::Ident, String::from("y")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::RBrace, String::from("}")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Let, String::from("let")),
-            Token::new(TokenType::Ident, String::from("result")),
-            Token::new(TokenType::Assign, String::from("=")),
-            Token::new(TokenType::Ident, String::from("add")),
-            Token::new(TokenType::LParen, String::from("(")),
-            Token::new(TokenType::Ident, String::from("five")),
-            Token::new(TokenType::Comma, String::from(",")),
-            Token::new(TokenType::Ident, String::from("ten")),
-            Token::new(TokenType::RParen, String::from(")")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Bang, String::from("!")),
-            Token::new(TokenType::Minus, String::from("-")),
-            Token::new(TokenType::Slash, String::from("/")),
-            Token::new(TokenType::Asterisk, String::from("*")),
-            Token::new(TokenType::Int, String::from("5")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Int, String::from("5")),
-            Token::new(TokenType::Lt, String::from("<")),
-            Token::new(TokenType::Int, String::from("10")),
-            Token::new(TokenType::Gt, String::from(">")),
-            Token::new(TokenType::Int, String::from("5")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::If, String::from("if")),
-            Token::new(TokenType::LParen, String::from("(")),
-            Token::new(TokenType::Int, String::from("5")),
-            Token::new(TokenType::Lt, String::from("<")),
-            Token::new(TokenType::Int, String::from("10")),
-            Token::new(TokenType::RParen, String::from(")")),
-            Token::new(TokenType::LBrace, String::from("{")),
-            Token::new(TokenType::Return, String::from("return")),
-            Token::new(TokenType::True, String::from("true")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::RBrace, String::from("}")),
-            Token::new(TokenType::Else, String::from("else")),
-            Token::new(TokenType::LBrace, String::from("{")),
-            Token::new(TokenType::Return, String::from("return")),
-            Token::new(TokenType::False, String::from("false")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::RBrace, String::from("}")),
-            Token::new(TokenType::Int, String::from("10")),
-            Token::new(TokenType::Eq, String::from("==")),
-            Token::new(TokenType::Int, String::from("10")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Int, String::from("10")),
-            Token::new(TokenType::NotEq, String::from("!=")),
-            Token::new(TokenType::Int, String::from("9")),
-            Token::new(TokenType::Semicolon, String::from(";")),
-            Token::new(TokenType::Eof, String::from("\0")),
+        struct TokenTest {
+            expected_type: TokenType,
+            expected_literal: String,
+        };
+
+        let token_tests = vec![
+            TokenTest { expected_type: TokenType::Let, expected_literal: String::from("let") }, 
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("five") },
+            TokenTest { expected_type: TokenType::Assign, expected_literal: String::from("=") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("5") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Let, expected_literal: String::from("let") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("ten") },
+            TokenTest { expected_type: TokenType::Assign, expected_literal: String::from("=") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("10") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Let, expected_literal: String::from("let") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("add") },
+            TokenTest { expected_type: TokenType::Assign, expected_literal: String::from("=") },
+            TokenTest { expected_type: TokenType::Function, expected_literal: String::from("fn") },
+            TokenTest { expected_type: TokenType::LParen, expected_literal: String::from("(") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("x") },
+            TokenTest { expected_type: TokenType::Comma, expected_literal: String::from(",") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("y") },
+            TokenTest { expected_type: TokenType::RParen, expected_literal: String::from(")") },
+            TokenTest { expected_type: TokenType::LBrace, expected_literal: String::from("{") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("x") },
+            TokenTest { expected_type: TokenType::Plus, expected_literal: String::from("+") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("y") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::RBrace, expected_literal: String::from("}") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Let, expected_literal: String::from("let") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("result") },
+            TokenTest { expected_type: TokenType::Assign, expected_literal: String::from("=") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("add") },
+            TokenTest { expected_type: TokenType::LParen, expected_literal: String::from("(") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("five") },
+            TokenTest { expected_type: TokenType::Comma, expected_literal: String::from(",") },
+            TokenTest { expected_type: TokenType::Ident, expected_literal: String::from("ten") },
+            TokenTest { expected_type: TokenType::RParen, expected_literal: String::from(")") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Bang, expected_literal: String::from("!") },
+            TokenTest { expected_type: TokenType::Minus, expected_literal: String::from("-") },
+            TokenTest { expected_type: TokenType::Slash, expected_literal: String::from("/") },
+            TokenTest { expected_type: TokenType::Asterisk, expected_literal: String::from("*") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("5") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("5") },
+            TokenTest { expected_type: TokenType::Lt, expected_literal: String::from("<") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("10") },
+            TokenTest { expected_type: TokenType::Gt, expected_literal: String::from(">") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("5") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::If, expected_literal: String::from("if") },
+            TokenTest { expected_type: TokenType::LParen, expected_literal: String::from("(") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("5") },
+            TokenTest { expected_type: TokenType::Lt, expected_literal: String::from("<") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("10") },
+            TokenTest { expected_type: TokenType::RParen, expected_literal: String::from(")") },
+            TokenTest { expected_type: TokenType::LBrace, expected_literal: String::from("{") },
+            TokenTest { expected_type: TokenType::Return, expected_literal: String::from("return") },
+            TokenTest { expected_type: TokenType::True, expected_literal: String::from("true") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::RBrace, expected_literal: String::from("}") },
+            TokenTest { expected_type: TokenType::Else, expected_literal: String::from("else") },
+            TokenTest { expected_type: TokenType::LBrace, expected_literal: String::from("{") },
+            TokenTest { expected_type: TokenType::Return, expected_literal: String::from("return") },
+            TokenTest { expected_type: TokenType::False, expected_literal: String::from("false") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::RBrace, expected_literal: String::from("}") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("10") },
+            TokenTest { expected_type: TokenType::Eq, expected_literal: String::from("==") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("10") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("10") },
+            TokenTest { expected_type: TokenType::NotEq, expected_literal: String::from("!=") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("9") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("foobar") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("foo bar") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("hello \"world\"") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("hello\n world") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("hello\t\t\tworld") },
+            TokenTest { expected_type: TokenType::LBracket, expected_literal: String::from("[") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("1") },
+            TokenTest { expected_type: TokenType::Comma, expected_literal: String::from(",") },
+            TokenTest { expected_type: TokenType::Int, expected_literal: String::from("2") },
+            TokenTest { expected_type: TokenType::RBracket, expected_literal: String::from("]") },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::Eof, expected_literal: String::from("\0") },
         ];
 
         let mut lexer = Lexer::new(input);
-        for expected_token in tests {
+        for token_test in token_tests {
             let token = lexer.next_token();
 
-            assert_eq!(expected_token.token_type, token.token_type);
-            assert_eq!(expected_token.literal, token.literal);
+            assert_eq!(token_test.expected_type, token.token_type);
+            assert_eq!(token_test.expected_literal, token.literal);
         }
     }
 }

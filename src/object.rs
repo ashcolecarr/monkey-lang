@@ -9,7 +9,19 @@ pub const BOOLEAN_OBJ: &str = "BOOLEAN";
 pub const NULL_OBJ: &str = "NULL";
 pub const RETURN_VALUE_OBJ: &str = "RETURN_VALUE";
 pub const ERROR_OBJ: &str = "ERROR";
-pub const FUNCION_OBJ: &str = "FUNCTION";
+pub const FUNCTION_OBJ: &str = "FUNCTION";
+pub const STRING_OBJ: &str = "STRING";
+pub const BUILTIN_OBJ: &str = "BUILTIN";
+pub const ARRAY_OBJ: &str = "ARRAY";
+
+#[derive(Clone)]
+pub enum BuiltinFunction {
+    Len,
+    First,
+    Last,
+    Rest,
+    Push,
+}
 
 type ObjectType = String;
 
@@ -173,7 +185,7 @@ impl Function {
 
 impl Object for Function {
     fn type_of(&self) -> ObjectType {
-        FUNCION_OBJ.to_string()
+        FUNCTION_OBJ.to_string()
     }
 
     fn inspect(&self) -> String {
@@ -182,6 +194,169 @@ impl Object for Function {
     }
 
     fn as_any(&self) -> &dyn Any where dyn Object: 'static {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct StringObject {
+    pub value: String,
+}
+
+impl StringObject {
+    pub fn new(value: String) -> Self {
+        Self { value }
+    }
+}
+
+impl Object for StringObject {
+    fn type_of(&self) -> ObjectType {
+        STRING_OBJ.to_string()
+    }
+
+    fn inspect(&self) -> String {
+        format!("{}", self.value.clone())
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct Builtin {
+    pub builtin_function: BuiltinFunction,
+}
+
+impl Builtin {
+    pub fn new(function_name: String) -> Option<Self> {
+        match function_name.as_str() {
+            "len" => Some(Self { builtin_function: BuiltinFunction::Len }),
+            "first" => Some(Self { builtin_function: BuiltinFunction::First }),
+            "last" => Some(Self { builtin_function: BuiltinFunction::Last }),
+            "rest" => Some(Self { builtin_function: BuiltinFunction::Rest }),
+            "push" => Some(Self { builtin_function: BuiltinFunction::Push }),
+            _ => None,
+        }
+    }
+
+    pub fn call(&self, args: &Vec<Box<dyn Object>>) -> Box<dyn Object> {
+        match self.builtin_function {
+            BuiltinFunction::Len => {
+                if args.len() != 1 {
+                    return Box::new(Error::new(format!("wrong number of arguments. got {}, want 1", args.len())));
+                }
+
+                match (args[0].as_any().downcast_ref::<Array>(), args[0].as_any().downcast_ref::<StringObject>()) {
+                    (Some(arr), _) => Box::new(Integer::new(arr.elements.len() as i64)),
+                    (_, Some(st)) => Box::new(Integer::new(st.value.len() as i64)),
+                    _ => Box::new(Error::new(format!("argument to 'len' not supported, got {}", args[0].type_of()))),
+                }
+            },
+            BuiltinFunction::First => {
+                if args.len() != 1 {
+                    return Box::new(Error::new(format!("wrong number of arguments. got {}, want 1", args.len())));
+                }
+
+                match args[0].as_any().downcast_ref::<Array>() {
+                    Some(arr) => {
+                        if !arr.elements.is_empty() {
+                            arr.elements[0].clone()
+                        } else {
+                            Box::new(Null::new())
+                        }
+                    },
+                    _ => Box::new(Error::new(format!("argument to 'first' must be ARRAY, got {}", args[0].type_of()))),
+                }
+            },
+            BuiltinFunction::Last => {
+                if args.len() != 1 {
+                    return Box::new(Error::new(format!("wrong number of arguments. got {}, want 1", args.len())));
+                }
+
+                match args[0].as_any().downcast_ref::<Array>() {
+                    Some(arr) => {
+                        if !arr.elements.is_empty() {
+                            arr.elements[arr.elements.len() - 1].clone()
+                        } else {
+                            Box::new(Null::new())
+                        }
+                    },
+                    _ => Box::new(Error::new(format!("argument to 'last' must be ARRAY, got {}", args[0].type_of()))),
+                }
+            },
+            BuiltinFunction::Rest => {
+                if args.len() != 1 {
+                    return Box::new(Error::new(format!("wrong number of arguments. got {}, want 1", args.len())));
+                }
+
+                match args[0].as_any().downcast_ref::<Array>() {
+                    Some(arr) => {
+                        if !arr.elements.is_empty() {
+                            let new_elements: Vec<Box<dyn Object>> = arr.elements[1..].to_vec();
+                            Box::new(Array::new(new_elements))
+                        } else {
+                            Box::new(Null::new())
+                        }
+                    },
+                    _ => Box::new(Error::new(format!("argument to 'rest' must be ARRAY, got {}", args[0].type_of()))),
+                }
+            },
+            BuiltinFunction::Push => {
+                if args.len() != 2 {
+                    return Box::new(Error::new(format!("wrong number of arguments. got {}, want 2", args.len())));
+                }
+
+                match args[0].as_any().downcast_ref::<Array>() {
+                    Some(arr) => {
+                        let mut new_array = arr.elements.clone();
+                        new_array.push(args[1].clone());
+
+                        Box::new(Array::new(new_array))
+                    },
+                    _ => Box::new(Error::new(format!("argument to 'push' must be ARRAY, got {}", args[0].type_of()))),
+                }
+            },
+        }
+    }
+}
+
+impl Object for Builtin {
+    fn type_of(&self) -> ObjectType {
+        BUILTIN_OBJ.to_string()
+    }
+
+    fn inspect(&self) -> String {
+        String::from("builtin function")
+    }
+
+    fn as_any(&self) -> &dyn Any where dyn Object: 'static {
+        self
+    }
+}
+
+#[derive(Clone)]
+pub struct Array {
+    pub elements: Vec<Box<dyn Object>>,
+}
+
+impl Array {
+    pub fn new(elements: Vec<Box<dyn Object>>) -> Self {
+        Self { elements }
+    }
+}
+
+impl Object for Array {
+    fn type_of(&self) -> ObjectType {
+        ARRAY_OBJ.to_string()
+    }
+
+    fn inspect(&self) -> String {
+        let elements: Vec<String> = self.elements.iter().map(|e| e.inspect()).collect();
+        format!("[{}]", elements.join(", "))
+    }
+
+    fn as_any(&self) -> &dyn Any {
         self
     }
 }

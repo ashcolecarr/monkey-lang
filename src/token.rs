@@ -8,6 +8,7 @@ pub enum TokenType {
     // Identifiers and literals
     Ident,
     Int,
+    String,
 
     // Operators
     Assign,
@@ -28,6 +29,8 @@ pub enum TokenType {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
 
     // Keywords
     Function,

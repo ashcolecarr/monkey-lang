@@ -542,6 +542,117 @@ impl Expression for CallExpression {
 }
 
 #[derive(Clone)]
+pub struct StringLiteral {
+    pub token: Token,
+    pub value: String,
+}
+
+impl StringLiteral {
+    pub fn new(token: Token, value: String) -> Self {
+        Self { token, value }
+    }
+}
+
+impl Node for StringLiteral {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn type_of(&self) -> &'static str {
+        "StringLiteral"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for StringLiteral {
+    fn value(&self) -> String {
+        self.value.clone()
+    }
+}
+
+#[derive(Clone)]
+pub struct ArrayLiteral {
+    pub token: Token,
+    pub elements: Vec<Box<dyn Expression>>,
+}
+
+impl ArrayLiteral {
+    pub fn new(token: Token, elements: Vec<Box<dyn Expression>>) -> Self {
+        Self { token, elements }
+    }
+}
+
+impl Node for ArrayLiteral {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        let elements: Vec<String> = self.elements.iter().map(|e| e.to_string()).collect();
+        format!("[{}]", elements.join(", "))
+    }
+
+    fn type_of(&self) -> &'static str {
+        "ArrayLiteral"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for ArrayLiteral {
+    fn value(&self) -> String {
+        let elements: Vec<String> = self.elements.iter().map(|e| e.to_string()).collect();
+        format!("[{}]", elements.join(", "))
+    }
+}
+
+#[derive(Clone)]
+pub struct IndexExpression {
+    pub token: Token,
+    pub left: Box<dyn Expression>,
+    pub index: Box<dyn Expression>,
+}
+
+impl IndexExpression {
+    pub fn new(token: Token, left: Box<dyn Expression>, index: Box<dyn Expression>) -> Self {
+        Self { token, left, index }
+    }
+}
+
+impl Node for IndexExpression {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        format!("({}[{}])", self.left.to_string(), self.index.to_string())
+    }
+
+    fn type_of(&self) -> &'static str {
+        "IndexExpression"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for IndexExpression {
+    fn value(&self) -> String {
+        format!("({}[{}])", self.left.to_string(), self.index.to_string())
+    }
+}
+
+#[derive(Clone)]
 pub struct Program {
     pub statements: Vec<Box<dyn Statement>>,
 }
