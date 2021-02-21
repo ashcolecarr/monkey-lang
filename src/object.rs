@@ -457,7 +457,7 @@ mod test {
     use super::*;
 
     #[test]
-    fn verify_string_hash_key() {
+    fn test_string_hash_key() {
         let hello1 = StringObject::new(String::from("Hello World"));
         let hello2 = StringObject::new(String::from("Hello World"));
         let diff1 = StringObject::new(String::from("My name is johnny"));
@@ -469,7 +469,7 @@ mod test {
     }
 
     #[test]
-    fn verify_boolean_hash_key() {
+    fn test_boolean_hash_key() {
         let true1 = Boolean::new(true);
         let true2 = Boolean::new(true);
         let false1 = Boolean::new(false);
@@ -481,7 +481,7 @@ mod test {
     }
 
     #[test]
-    fn verify_integer_hash_key() {
+    fn test_integer_hash_key() {
         let one1 = Integer::new(1);
         let one2 = Integer::new(1);
         let two1 = Integer::new(2);

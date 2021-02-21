@@ -49,7 +49,7 @@ pub fn start() {
 
 fn print_parser_errors(errors: &Vec<String>) {
     eprintln!("{}", MONKEY_FACE);
-    eprintln!("Woops! We ran into some monkey business here!");
+    eprintln!("Whoops! We ran into some monkey business here!");
     eprintln!(" Parser errors:");
     for error in errors {
         eprintln!("\t{}", error);

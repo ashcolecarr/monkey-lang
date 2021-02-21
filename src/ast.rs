@@ -764,7 +764,7 @@ mod test {
     use super::super::token::TokenType;
 
     #[test]
-    fn verify_to_string_returns_correct_value() {
+    fn test_string() {
         let mut program = Program::new();
 
         program.statements.push(

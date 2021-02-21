@@ -545,7 +545,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_let_statements_are_parsed() {
+    fn test_let_statements() {
         struct LetTest {
             input: String,
             expected_identifier: String,
@@ -570,15 +570,15 @@ mod tests {
             };
 
             let stmt = &program.unwrap().statements[0];
-            verify_let_statement(&stmt, &let_test.expected_identifier);
+            test_let_statement(&stmt, &let_test.expected_identifier);
             match stmt.as_any().downcast_ref::<LetStatement>() {
                 Some(s) => {
                     match &s.value {
                         Some(v) => { 
                             match let_test.expected_value {
-                                ExpType::Int(ei) => verify_literal_expression(&v, ei),
-                                ExpType::String(es) => verify_literal_expression(&v, es),
-                                ExpType::Bool(eb) => verify_literal_expression(&v, eb),
+                                ExpType::Int(ei) => test_literal_expression(&v, ei),
+                                ExpType::String(es) => test_literal_expression(&v, es),
+                                ExpType::Bool(eb) => test_literal_expression(&v, eb),
                             }
                         },
                         None => assert!(false, "Statement value was None."),
@@ -590,7 +590,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_return_statements_are_parsed() {
+    fn test_return_statements() {
         struct ReturnTest {
             input: String,
             expected_value: ExpType,
@@ -620,9 +620,9 @@ mod tests {
                     match &s.return_value {
                         Some(r) => { 
                             match return_test.expected_value {
-                                ExpType::Int(ei) => verify_literal_expression(&r, ei),
-                                ExpType::String(es) => verify_literal_expression(&r, es),
-                                ExpType::Bool(eb) => verify_literal_expression(&r, eb),
+                                ExpType::Int(ei) => test_literal_expression(&r, ei),
+                                ExpType::String(es) => test_literal_expression(&r, es),
+                                ExpType::Bool(eb) => test_literal_expression(&r, eb),
                             }
                         },
                         None => assert!(false, "Statement value was None."),
@@ -631,35 +631,10 @@ mod tests {
                 None => assert!(false, "Statement is not of type ReturnStatement"),
             }
         }
-        let input = String::from(r#"return 5;
-return 10;
-return 993322;"#);
-
-        let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer);
-
-        let program = parser.parse_program();
-        check_parser_errors(&parser);
-        match program.clone() {
-            Some(p) => assert_eq!(p.statements.len(), 3),
-            None => assert!(false, "parse_program() returned None."),
-        };
-
-        let tests = vec![
-            String::from("x"),
-            String::from("y"),
-            String::from("foobar"),
-        ];
-
-        for (i, _test) in tests.iter().enumerate() {
-            let stmt = program.clone().unwrap().statements[i].clone();
-            assert_eq!(stmt.clone().token_literal(), String::from("return"));
-            assert_eq!(stmt.clone().type_of(), "ReturnStatement");
-        }
     }
 
     #[test]
-    fn verify_identifier_expressions_are_parsed() {
+    fn test_identifier_expression() {
         let input = String::from("foobar;");
 
         let lexer = Lexer::new(input);
@@ -689,7 +664,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_integer_literal_expressions_are_parsed() {
+    fn test_integer_literal_expression() {
         let input = String::from("5;");
 
         let lexer = Lexer::new(input);
@@ -719,7 +694,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_prefix_expressions_are_parsed() {
+    fn test_parsing_prefix_expressions() {
         struct PrefixTest {
             input: String,
             operator: String,
@@ -748,8 +723,8 @@ return 993322;"#);
             match stmt.expression() {
                 Some(e) => {
                     match prefix_test.value {
-                        ExpType::Int(iv) => verify_prefix_expression(&e, &prefix_test.operator, iv),
-                        ExpType::Bool(bv) => verify_prefix_expression(&e, &prefix_test.operator, bv),
+                        ExpType::Int(iv) => test_prefix_expression(&e, &prefix_test.operator, iv),
+                        ExpType::Bool(bv) => test_prefix_expression(&e, &prefix_test.operator, bv),
                         ExpType::String(_) => (),
                     };
                 },
@@ -759,7 +734,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_infix_expressions_are_parsed() {
+    fn test_parsing_infix_expressions() {
         struct InfixTest {
             input: String,
             left_value: ExpType,
@@ -796,8 +771,8 @@ return 993322;"#);
             match stmt.expression() {
                 Some(e) => {
                     match (infix_test.left_value, infix_test.right_value) {
-                        (ExpType::Int(il), ExpType::Int(ir)) => verify_infix_expression(&e, il, &infix_test.operator, ir),
-                        (ExpType::Bool(bl), ExpType::Bool(br)) => verify_infix_expression(&e, bl, &infix_test.operator, br),
+                        (ExpType::Int(il), ExpType::Int(ir)) => test_infix_expression(&e, il, &infix_test.operator, ir),
+                        (ExpType::Bool(bl), ExpType::Bool(br)) => test_infix_expression(&e, bl, &infix_test.operator, br),
                         _ => assert!(false, "Left and right value types are mismatched."),
                     };
                 },
@@ -807,7 +782,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_operator_precedences_are_parsed() {
+    fn test_operator_precedence_parsing() {
         struct OperatorTest {
             input: String,
             expected: String,
@@ -859,7 +834,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_boolean_expressions_are_parsed() {
+    fn test_boolean_expression() {
         let input = String::from("true;");
 
         let lexer = Lexer::new(input);
@@ -888,7 +863,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_if_expressions_are_parsed() {
+    fn test_if_expression() {
         let input = String::from("if (x < y) { x }");
 
         let lexer = Lexer::new(input);
@@ -906,12 +881,12 @@ return 993322;"#);
             Some(e) => {
                 match e.as_any().downcast_ref::<IfExpression>() {
                     Some(if_exp) => {
-                        verify_infix_expression(&if_exp.condition, String::from("x"), &String::from("<"), String::from("y"));
+                        test_infix_expression(&if_exp.condition, String::from("x"), &String::from("<"), String::from("y"));
                         match if_exp.consequence.as_any().downcast_ref::<BlockStatement>() {
                             Some(block) => {
                                 assert_eq!(block.statements.len(), 1);
                                 match block.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
-                                    Some(stmt_exp) => verify_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("x")),
+                                    Some(stmt_exp) => test_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("x")),
                                     None => assert!(false, "Not an ExpressionStatement"),
                                 };
                             },
@@ -930,7 +905,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_if_else_expressions_are_parsed() {
+    fn test_if_else_expression() {
         let input = String::from("if (x < y) { x } else { y }");
 
         let lexer = Lexer::new(input);
@@ -948,12 +923,12 @@ return 993322;"#);
             Some(e) => {
                 match e.as_any().downcast_ref::<IfExpression>() {
                     Some(if_exp) => {
-                        verify_infix_expression(&if_exp.condition, String::from("x"), &String::from("<"), String::from("y"));
+                        test_infix_expression(&if_exp.condition, String::from("x"), &String::from("<"), String::from("y"));
                         match if_exp.consequence.as_any().downcast_ref::<BlockStatement>() {
                             Some(block) => {
                                 assert_eq!(block.statements.len(), 1);
                                 match block.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
-                                    Some(stmt_exp) => verify_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("x")),
+                                    Some(stmt_exp) => test_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("x")),
                                     None => assert!(false, "Not an ExpressionStatement"),
                                 };
                             },
@@ -965,7 +940,7 @@ return 993322;"#);
                                     Some(block) => {
                                         assert_eq!(block.statements.len(), 1);
                                         match block.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
-                                            Some(stmt_exp) => verify_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("y")),
+                                            Some(stmt_exp) => test_identifier(&stmt_exp.expression.clone().unwrap(), &String::from("y")),
                                             None => assert!(false, "Not an ExpressionStatement"),
                                         };
                                     },
@@ -983,7 +958,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_function_literals_are_parsed() {
+    fn test_function_literal_parsing() {
         let input = String::from("fn(x, y) { x + y; }");
 
         let lexer = Lexer::new(input);
@@ -1002,13 +977,13 @@ return 993322;"#);
                 match e.as_any().downcast_ref::<FunctionLiteral>() {
                     Some(func_lit) => {
                         assert_eq!(func_lit.parameters.len(), 2);
-                        verify_literal_expression(&func_lit.parameters[0], String::from("x"));
-                        verify_literal_expression(&func_lit.parameters[1], String::from("y"));
+                        test_literal_expression(&func_lit.parameters[0], String::from("x"));
+                        test_literal_expression(&func_lit.parameters[1], String::from("y"));
                         match func_lit.body.as_any().downcast_ref::<BlockStatement>() {
                             Some(body) => {
                                 assert_eq!(body.statements.len(), 1);
                                 match body.statements[0].as_any().downcast_ref::<ExpressionStatement>() {
-                                    Some(stmt_exp) => verify_infix_expression(&stmt_exp.expression.clone().unwrap(), String::from("x"), &String::from("+"), String::from("y")),
+                                    Some(stmt_exp) => test_infix_expression(&stmt_exp.expression.clone().unwrap(), String::from("x"), &String::from("+"), String::from("y")),
                                     None => assert!(false, "Not an ExpressionStatement"),
                                 };
                             },
@@ -1023,7 +998,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_function_parameters_are_parsed() {
+    fn test_function_parameter_parsing() {
         struct ParamTest {
             input: String,
             expected_params: Vec<String>,
@@ -1054,7 +1029,7 @@ return 993322;"#);
                         Some(func_lit) => {
                             assert_eq!(func_lit.parameters.len(), param_test.expected_params.len());
                             for (i, param) in param_test.expected_params.iter().enumerate() {
-                                verify_literal_expression(&func_lit.parameters[i], param.clone());
+                                test_literal_expression(&func_lit.parameters[i], param.clone());
                             }
                         },
                         None => assert!(false, "Not a FunctionLiteral")
@@ -1066,7 +1041,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_call_expressions_are_parsed() {
+    fn test_call_expression_parsing() {
         let input = String::from("add(1, 2 * 3, 4 + 5);");
 
         let lexer = Lexer::new(input);
@@ -1084,11 +1059,11 @@ return 993322;"#);
             Some(e) => {
                 match e.as_any().downcast_ref::<CallExpression>() {
                     Some(call_exp) => {
-                        verify_identifier(&call_exp.function, &String::from("add"));
+                        test_identifier(&call_exp.function, &String::from("add"));
                         assert_eq!(call_exp.arguments.len(), 3);
-                        verify_literal_expression(&call_exp.arguments[0], 1);
-                        verify_infix_expression(&call_exp.arguments[1].clone(), 2, &String::from("*"), 3);
-                        verify_infix_expression(&call_exp.arguments[2].clone(), 4, &String::from("+"), 5);
+                        test_literal_expression(&call_exp.arguments[0], 1);
+                        test_infix_expression(&call_exp.arguments[1].clone(), 2, &String::from("*"), 3);
+                        test_infix_expression(&call_exp.arguments[2].clone(), 4, &String::from("+"), 5);
                     },
                     None => assert!(false, "Not a CallExpression")
                 }
@@ -1098,7 +1073,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_call_expression_parameters_are_parsed() {
+    fn test_call_expression_parameter_parsing() {
         struct ArgTest {
             input: String,
             expected_ident: String,
@@ -1123,7 +1098,7 @@ return 993322;"#);
                 Some(e) => {
                     match e.as_any().downcast_ref::<CallExpression>() {
                         Some(call_exp) => {
-                            verify_identifier(&call_exp.function, &arg_test.expected_ident);
+                            test_identifier(&call_exp.function, &arg_test.expected_ident);
                             assert_eq!(call_exp.arguments.len(), arg_test.expected_args.len());
                             for (i, arg) in arg_test.expected_args.iter().enumerate() {
                                 assert_eq!(&call_exp.arguments[i].to_string(), arg);
@@ -1138,7 +1113,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_string_literal_expressions_are_parsed() {
+    fn test_string_literal_expression() {
         let input = String::from("\"hello world\";");
 
         let lexer = Lexer::new(input);
@@ -1164,7 +1139,35 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_array_literals_are_parsed() {
+    fn test_parsing_empty_array_literals() {
+        let input = String::from("[]");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<ArrayLiteral>() {
+                    Some(arr_lit) => {
+                        assert_eq!(arr_lit.elements.len(), 0);
+                    },
+                    None => assert!(false, "Not an ArrayLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_array_literals() {
         let input = String::from("[1, 2 * 2, 3 + 3]");
 
         let lexer = Lexer::new(input);
@@ -1183,9 +1186,9 @@ return 993322;"#);
                 match e.as_any().downcast_ref::<ArrayLiteral>() {
                     Some(arr_lit) => {
                         assert_eq!(arr_lit.elements.len(), 3);
-                        verify_integer_literal(&arr_lit.elements[0], 1);
-                        verify_infix_expression(&arr_lit.elements[1], 2, &String::from("*"), 2);
-                        verify_infix_expression(&arr_lit.elements[2], 3, &String::from("+"), 3);
+                        test_integer_literal(&arr_lit.elements[0], 1);
+                        test_infix_expression(&arr_lit.elements[1], 2, &String::from("*"), 2);
+                        test_infix_expression(&arr_lit.elements[2], 3, &String::from("+"), 3);
                     },
                     None => assert!(false, "Not an ArrayLiteral")
                 }
@@ -1195,7 +1198,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_index_expressions_are_parsed() {
+    fn test_parsing_index_expressions() {
         let input = String::from("myArray[1 + 1]");
 
         let lexer = Lexer::new(input);
@@ -1213,8 +1216,8 @@ return 993322;"#);
             Some(e) => {
                 match e.as_any().downcast_ref::<IndexExpression>() {
                     Some(idx) => {
-                        verify_identifier(&idx.left, &String::from("myArray"));
-                        verify_infix_expression(&idx.index, 1, &String::from("+"), 1);
+                        test_identifier(&idx.left, &String::from("myArray"));
+                        test_infix_expression(&idx.index, 1, &String::from("+"), 1);
                     },
                     None => assert!(false, "Not an IndexExpression")
                 }
@@ -1224,7 +1227,35 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_hash_literals_string_keys_are_parsed() {
+    fn test_parsing_empty_hash_literal() {
+        let input = String::from("{}");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<HashLiteral>() {
+                    Some(hash_lit) => {
+                        assert_eq!(hash_lit.pairs.len(), 0);
+                    },
+                    None => assert!(false, "Not a HashLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_hash_literals_string_keys() {
         let input = String::from("{\"one\": 1, \"two\": 2, \"three\": 3}");
 
         let lexer = Lexer::new(input);
@@ -1252,7 +1283,7 @@ return 993322;"#);
                             match key.as_any().downcast_ref::<StringLiteral>() {
                                 Some(k) => {
                                     let expected_value = expected[&k.value];
-                                    verify_integer_literal(&value, expected_value);
+                                    test_integer_literal(&value, expected_value);
                                 },
                                 None => assert!(false, "Key is a not a StringLiteral"),
                             }
@@ -1266,33 +1297,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_empty_hash_literals_are_parsed() {
-        let input = String::from("{}");
-
-        let lexer = Lexer::new(input);
-        let mut parser = Parser::new(lexer);
-
-        let program = parser.parse_program();
-        check_parser_errors(&parser);
-        match &program {
-            Some(p) => assert_eq!(p.statements.len(), 1),
-            None => assert!(false, "parse_program() returned None."),
-        };
-
-        let stmt = &program.unwrap().statements[0];
-        match stmt.expression() {
-            Some(e) => {
-                match e.as_any().downcast_ref::<HashLiteral>() {
-                    Some(hash_lit) =>  assert_eq!(hash_lit.pairs.len(), 0),
-                    None => assert!(false, "Not a HashLiteral")
-                }
-            },
-            None => assert!(false, "Expression statement was not returned."),
-        };
-    }
-
-    #[test]
-    fn verify_hash_literals_boolean_keys_are_parsed() {
+    fn test_parsing_hash_literals_boolean_keys() {
         let input = String::from("{true: 1, false: 2}");
 
         let lexer = Lexer::new(input);
@@ -1319,7 +1324,7 @@ return 993322;"#);
                             match key.as_any().downcast_ref::<BooleanLiteral>() {
                                 Some(k) => {
                                     let expected_value = expected[&k.value];
-                                    verify_integer_literal(&value, expected_value);
+                                    test_integer_literal(&value, expected_value);
                                 },
                                 None => assert!(false, "Key is a not a BooleanLiteral"),
                             }
@@ -1333,7 +1338,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_hash_literals_integer_keys_are_parsed() {
+    fn test_parsing_hash_literals_integer_keys() {
         let input = String::from("{1: 1, 2: 2, 3: 3}");
 
         let lexer = Lexer::new(input);
@@ -1361,7 +1366,7 @@ return 993322;"#);
                             match key.as_any().downcast_ref::<IntegerLiteral>() {
                                 Some(k) => {
                                     let expected_value = expected[&k.value];
-                                    verify_integer_literal(&value, expected_value);
+                                    test_integer_literal(&value, expected_value);
                                 },
                                 None => assert!(false, "Key is a not a IntegerLiteral"),
                             }
@@ -1375,7 +1380,7 @@ return 993322;"#);
     }
 
     #[test]
-    fn verify_hash_literals_with_expressions_are_parsed() {
+    fn test_parsing_hash_literals_with_expressions() {
         struct ExpTest {
             left: i64,
             operator: String,
@@ -1408,7 +1413,7 @@ return 993322;"#);
                             match (key.as_any().downcast_ref::<StringLiteral>(), value.as_any().downcast_ref::<InfixExpression>()) {
                                 (Some(k), Some(_)) => {
                                     let expected_value = &expected[&k.value];
-                                    verify_infix_expression(&value, expected_value.left, &expected_value.operator, expected_value.right);
+                                    test_infix_expression(&value, expected_value.left, &expected_value.operator, expected_value.right);
                                 },
                                 _ => assert!(false, "Key is a not a StringLiteral"),
                             }
@@ -1421,39 +1426,39 @@ return 993322;"#);
         };
     }
 
-    fn verify_literal_expression<T>(expression: &Box<dyn Expression>, expected: T) where T: ValueType {
+    fn test_literal_expression<T>(expression: &Box<dyn Expression>, expected: T) where T: ValueType {
         match expected.get_type().as_str() {
-            "i64" => verify_integer_literal(expression, expected.get_i64()),
-            "String" => verify_identifier(expression, &expected.get_string()),
-            "bool" => verify_boolean_literal(expression, expected.get_boolean()),
+            "i64" => test_integer_literal(expression, expected.get_i64()),
+            "String" => test_identifier(expression, &expected.get_string()),
+            "bool" => test_boolean_literal(expression, expected.get_boolean()),
             _ => assert!(false, "Expression type was not handled"),
         }
     }
 
-    fn verify_prefix_expression<T>(expression: &Box<dyn Expression>, operator: &String, value: T) where T: ValueType {
+    fn test_prefix_expression<T>(expression: &Box<dyn Expression>, operator: &String, value: T) where T: ValueType {
         match expression.as_any().downcast_ref::<PrefixExpression>() {
             Some(exp) => {
                 assert_eq!(exp.operator, *operator);
-                verify_literal_expression(&exp.right, value);
+                test_literal_expression(&exp.right, value);
             },
             None => assert!(false, "Expression is not of type PrefixExpression."),
         };
     }
 
-    fn verify_infix_expression<T>(expression: &Box<dyn Expression>, left: T, 
+    fn test_infix_expression<T>(expression: &Box<dyn Expression>, left: T, 
         operator: &String, right: T) where T: ValueType {
 
         match expression.as_any().downcast_ref::<InfixExpression>() {
             Some(exp) => {
-                verify_literal_expression(&exp.left, left);
+                test_literal_expression(&exp.left, left);
                 assert_eq!(exp.operator, *operator);
-                verify_literal_expression(&exp.right, right);
+                test_literal_expression(&exp.right, right);
             },
             None => assert!(false, "Expression is not of type InfixExpression."),
         };
     }
 
-    fn verify_integer_literal(expression: &Box<dyn Expression>, value: i64) {
+    fn test_integer_literal(expression: &Box<dyn Expression>, value: i64) {
         match expression.as_any().downcast_ref::<IntegerLiteral>() {
             Some(e) => {
                 assert_eq!(e.value, value);
@@ -1463,7 +1468,7 @@ return 993322;"#);
         };
     }
 
-    fn verify_identifier(expression: &Box<dyn Expression>, value: &String) {
+    fn test_identifier(expression: &Box<dyn Expression>, value: &String) {
         match expression.as_any().downcast_ref::<Identifier>() {
             Some(e) => {
                 assert_eq!(e.value, *value);
@@ -1473,7 +1478,7 @@ return 993322;"#);
         };
     }
 
-    fn verify_boolean_literal(expression: &Box<dyn Expression>, value: bool) {
+    fn test_boolean_literal(expression: &Box<dyn Expression>, value: bool) {
         match expression.as_any().downcast_ref::<BooleanLiteral>() {
             Some(e) => {
                 assert_eq!(e.value, value);
@@ -1483,7 +1488,7 @@ return 993322;"#);
         };
     }
 
-    fn verify_let_statement(statement: &Box<dyn Statement>, name: &String) {
+    fn test_let_statement(statement: &Box<dyn Statement>, name: &String) {
         match statement.as_any().downcast_ref::<LetStatement>() {
             Some(s) => {
                 assert_eq!(s.name.value, *name);

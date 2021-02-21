@@ -6,185 +6,106 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 pub fn eval(node: Box<&dyn Node>, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
-    match node.type_of() {
-        // Statements
-        "Program" => {
-            match node.as_any().downcast_ref::<Program>() {
-                Some(p) => eval_program(&p, env),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "ExpressionStatement" => {
-            match node.as_any().downcast_ref::<ExpressionStatement>() {
-                Some(es) => {
-                    match &es.expression {
-                        Some(exp) => eval(Box::new(exp.as_base()), env),
-                        None => new_error(String::from("expression error: expression not found")),
-                    }
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "BlockStatement" => {
-            match node.as_any().downcast_ref::<BlockStatement>() {
-                Some(bs) => eval_block_statement(&bs, env),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "ReturnStatement" => {
-            match node.as_any().downcast_ref::<ReturnStatement>() {
-                Some(rs) => {
-                    match &rs.return_value {
-                        Some(r_val) => {
-                            let val = eval(Box::new(r_val.as_base()), env);
-                            if is_error(&val) {
-                                return val;
-                            }
-                            Box::new(ReturnValue::new(val))
-                        },
-                        None => Box::new(Null::new()),
-                    }
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "LetStatement" => {
-            match node.as_any().downcast_ref::<LetStatement>() {
-                Some(ls) => {
-                    match &ls.value {
-                        Some(v) => {
-                            let val = eval(Box::new(v.clone().as_base()), Rc::clone(&env));
-                            if is_error(&val) {
-                                return val;
-                            }
-                            env.borrow_mut().set(ls.name.value.clone(), val)
-                        },
-                        None => Box::new(Null::new()),
-                    }
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        // Expressions
-        "IntegerLiteral" => {
-            match node.as_any().downcast_ref::<IntegerLiteral>() {
-                Some(il) => Box::new(Integer::new(il.value)),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "Boolean" => {
-            match node.as_any().downcast_ref::<BooleanLiteral>() {
-                Some(b) => Box::new(super::object::Boolean::new(b.value)),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "PrefixExpression" => {
-            match node.as_any().downcast_ref::<PrefixExpression>() {
-                Some(pe) => {
-                    let right = eval(Box::new(pe.right.as_base()), env);
-                    if is_error(&right) {
-                        return right;
-                    }
-                    eval_prefix_expression(&pe.operator, right)
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "InfixExpression" => {
-            match node.as_any().downcast_ref::<InfixExpression>() {
-                Some(ie) => {
-                    let left = eval(Box::new(ie.left.as_base()), Rc::clone(&env));
-                    if is_error(&left) {
-                        return left;
-                    }
-                    let right = eval(Box::new(ie.right.as_base()), Rc::clone(&env));
-                    if is_error(&right) {
-                        return right;
-                    }
-                    eval_infix_expression(&ie.operator, left, right)
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "IfExpression" => {
-            match node.as_any().downcast_ref::<IfExpression>() {
-                Some(ie) => eval_if_expression(&ie, env),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "Identifier" => {
-            match node.as_any().downcast_ref::<Identifier>() {
-                Some(i) => eval_identifier(&i, env),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "FunctionLiteral" => {
-            match node.as_any().downcast_ref::<FunctionLiteral>() {
-                Some(fl) => Box::new(Function::new(fl.parameters.clone(), fl.body.clone(), Rc::clone(&env))),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "CallExpression" => {
-            match node.as_any().downcast_ref::<CallExpression>() {
-                Some(ce) => {
-                    let function = eval(Box::new(ce.function.as_base()), Rc::clone(&env));
-                    if is_error(&function) {
-                        return function;
-                    }
-                    
-                    let args = eval_expressions(&ce.arguments, env);
-                    if args.len() == 1 && is_error(&args[0]) {
-                        return args[0].clone();
-                    }
+    // Statements
+    if let Some(p) = node.as_any().downcast_ref::<Program>() {
+        eval_program(&p, env)
+    } else if let Some(es) = node.as_any().downcast_ref::<ExpressionStatement>() {
+        match &es.expression {
+            Some(exp) => eval(Box::new(exp.as_base()), env),
+            None => new_error(String::from("expression error: expression not found")),
+        }
+    } else if let Some(bs) = node.as_any().downcast_ref::<BlockStatement>() {
+        eval_block_statement(&bs, env)
+    } else if let Some(rs) = node.as_any().downcast_ref::<ReturnStatement>() {
+        match &rs.return_value {
+            Some(r_val) => {
+                let val = eval(Box::new(r_val.as_base()), env);
+                if is_error(&val) {
+                    return val;
+                }
 
-                    apply_function(function, args)
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "StringLiteral" => {
-            match node.as_any().downcast_ref::<StringLiteral>() {
-                Some(sl) => Box::new(StringObject::new(sl.value.clone())),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "ArrayLiteral" => {
-            match node.as_any().downcast_ref::<ArrayLiteral>() {
-                Some(al) => {
-                    let elements = eval_expressions(&al.elements, env);
-                    if elements.len() == 1 && is_error(&elements[0]) {
-                        return elements[0].clone();
-                    }
-                    Box::new(Array::new(elements))
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "IndexExpression" => {
-            match node.as_any().downcast_ref::<IndexExpression>() {
-                Some(ie) => {
-                    let left = eval(Box::new(ie.left.as_base()), Rc::clone(&env));
-                    if is_error(&left) {
-                        return left;
-                    }
+                Box::new(ReturnValue::new(val))
+            },
+            None => Box::new(Null::new()),
+        }
+    } else if let Some(ls) = node.as_any().downcast_ref::<LetStatement>() {
+        match &ls.value {
+            Some(v) => {
+                let val = eval(Box::new(v.clone().as_base()), Rc::clone(&env));
+                if is_error(&val) {
+                    return val;
+                }
+                env.borrow_mut().set(ls.name.value.clone(), val)
+            },
+            None => Box::new(Null::new()),
+        }
+    // Expressions
+    } else if let Some(il) = node.as_any().downcast_ref::<IntegerLiteral>() {
+        Box::new(Integer::new(il.value))
+    } else if let Some(bl) = node.as_any().downcast_ref::<BooleanLiteral>() {
+        Box::new(Boolean::new(bl.value))
+    } else if let Some(pe) = node.as_any().downcast_ref::<PrefixExpression>() {
+        let right = eval(Box::new(pe.right.as_base()), env);
+        if is_error(&right) {
+            return right;
+        }
 
-                    let index = eval(Box::new(ie.index.as_base()), env);
-                    if is_error(&index) {
-                        return index;
-                    }
+        eval_prefix_expression(&pe.operator, right)       
+    } else if let Some(ie) = node.as_any().downcast_ref::<InfixExpression>() {
+        let left = eval(Box::new(ie.left.as_base()), Rc::clone(&env));
+        if is_error(&left) {
+            return left;
+        }
 
-                    eval_index_expression(left, index)
-                },
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        "HashLiteral" => {
-            match node.as_any().downcast_ref::<HashLiteral>() {
-                Some(hl) => eval_hash_literal(&hl, env),
-                None => new_error(format!("type error: expected {}", node.type_of())),
-            }
-        },
-        _ => new_error(String::from("type error: type not found")),
+        let right = eval(Box::new(ie.right.as_base()), Rc::clone(&env));
+        if is_error(&right) {
+            return right;
+        }
+
+        eval_infix_expression(&ie.operator, left, right)
+    } else if let Some(ie) = node.as_any().downcast_ref::<IfExpression>() {
+        eval_if_expression(&ie, env)
+    } else if let Some(i) = node.as_any().downcast_ref::<Identifier>() {
+        eval_identifier(&i, env)
+    } else if let Some(fl) = node.as_any().downcast_ref::<FunctionLiteral>() {
+        Box::new(Function::new(fl.parameters.clone(), fl.body.clone(), Rc::clone(&env)))
+    } else if let Some(ce) = node.as_any().downcast_ref::<CallExpression>() {
+        let function = eval(Box::new(ce.function.as_base()), Rc::clone(&env));
+        if is_error(&function) {
+            return function;
+        }
+        
+        let args = eval_expressions(&ce.arguments, env);
+        if args.len() == 1 && is_error(&args[0]) {
+            return args[0].clone();
+        }
+
+        apply_function(function, args)
+    } else if let Some(sl) = node.as_any().downcast_ref::<StringLiteral>() {
+        Box::new(StringObject::new(sl.value.clone()))
+    } else if let Some(al) = node.as_any().downcast_ref::<ArrayLiteral>() {
+        let elements = eval_expressions(&al.elements, env);
+        if elements.len() == 1 && is_error(&elements[0]) {
+            return elements[0].clone();
+        }
+
+        Box::new(Array::new(elements))
+    } else if let Some(ie) = node.as_any().downcast_ref::<IndexExpression>() {
+        let left = eval(Box::new(ie.left.as_base()), Rc::clone(&env));
+        if is_error(&left) {
+            return left;
+        }
+
+        let index = eval(Box::new(ie.index.as_base()), env);
+        if is_error(&index) {
+            return index;
+        }
+
+        eval_index_expression(left, index)
+    } else if let Some(hl) = node.as_any().downcast_ref::<HashLiteral>() {
+        eval_hash_literal(&hl, env)
+    } else {
+        new_error(String::from(format!("type error: type {} not found", node.type_of())))
     }
 }
 
@@ -194,14 +115,10 @@ fn eval_program(program: &Program, env: Rc<RefCell<Environment>>) -> Box<dyn Obj
     for statement in &program.statements {
         result = eval(Box::new(statement.as_base()), Rc::clone(&env));
 
-        match result.as_any().downcast_ref::<ReturnValue>() {
-            Some(res) => return res.value.clone(),
-            None => (),
-        }
-
-        match result.as_any().downcast_ref::<Error>() {
-            Some(_) => return result,
-            None => (),
+        if let Some(res) = result.as_any().downcast_ref::<ReturnValue>() {
+            return res.value.clone();
+        } else if let Some(_) = result.as_any().downcast_ref::<Error>() {
+            return result;
         }
     }
 
@@ -214,10 +131,11 @@ fn eval_block_statement(block: &BlockStatement, env: Rc<RefCell<Environment>>) -
     for statement in &block.statements {
         result = eval(Box::new(statement.as_base()), Rc::clone(&env));
 
-        match result.type_of().as_str() {
-            RETURN_VALUE_OBJ | ERROR_OBJ => return result,
-            _ => (),
-        };
+        if let Some(_) = result.as_any().downcast_ref::<ReturnValue>() {
+            return result;
+        } else if let Some(_) = result.as_any().downcast_ref::<Error>() {
+            return result;
+        }
     }
 
     result
@@ -232,21 +150,16 @@ fn eval_prefix_expression(operator: &String, right: Box<dyn Object>) -> Box<dyn 
 }
 
 fn eval_bang_operator_expression(right: Box<dyn Object>) -> Box<dyn Object> {
-    match right.type_of().as_str() {
-        BOOLEAN_OBJ => {
-            match right.as_any().downcast_ref::<Boolean>() {
-                Some(r) => {
-                    if r.value { 
-                        Box::new(Boolean::new(false))
-                    } else {
-                        Box::new(Boolean::new(true))
-                    }
-                },
-                None => Box::new(Boolean::new(false)),
-            }
-        },
-        NULL_OBJ => Box::new(Boolean::new(true)),
-        _ => Box::new(Boolean::new(false)),
+    if let Some(b) = right.as_any().downcast_ref::<Boolean>() {
+        if b.value { 
+            Box::new(Boolean::new(false))
+        } else {
+            Box::new(Boolean::new(true))
+        }
+    } else if let Some(_) = right.as_any().downcast_ref::<Null>() {
+        Box::new(Boolean::new(true))
+    } else {
+        Box::new(Boolean::new(false))
     }
 }
 
@@ -261,16 +174,17 @@ fn eval_minus_operator_expression(right: Box<dyn Object>) -> Box<dyn Object> {
 }
 
 fn eval_infix_expression(operator: &String, left: Box<dyn Object>, right: Box<dyn Object>) -> Box<dyn Object> {
-    match (left.type_of().as_str(), right.type_of().as_str()) {
-        (INTEGER_OBJ, INTEGER_OBJ) => eval_integer_infix_expression(operator, left, right),
-        (BOOLEAN_OBJ, BOOLEAN_OBJ) => eval_boolean_infix_expression(operator, left, right),
-        (STRING_OBJ, STRING_OBJ) => eval_string_infix_expression(operator, left, right),
-        _ => {
-            if left.type_of() != right.type_of() {
-                return new_error(format!("type mismatch: {} {} {}", left.type_of(), operator, right.type_of()));
-            }
-            new_error(format!("unknown operator: {} {} {}", left.type_of(), operator, right.type_of()))
-        },
+    if let (Some(_), Some(_)) = (left.as_any().downcast_ref::<Integer>(), right.as_any().downcast_ref::<Integer>()) {
+        eval_integer_infix_expression(operator, left, right)
+    } else if let (Some(_), Some(_)) = (left.as_any().downcast_ref::<Boolean>(), right.as_any().downcast_ref::<Boolean>()) {
+        eval_boolean_infix_expression(operator, left, right)
+    } else if let (Some(_), Some(_)) = (left.as_any().downcast_ref::<StringObject>(), right.as_any().downcast_ref::<StringObject>()) {
+        eval_string_infix_expression(operator, left, right)
+    } else {
+        if left.type_of() != right.type_of() {
+            return new_error(format!("type mismatch: {} {} {}", left.type_of(), operator, right.type_of()));
+        }
+        new_error(format!("unknown operator: {} {} {}", left.type_of(), operator, right.type_of()))
     }
 }
 
@@ -291,7 +205,7 @@ fn eval_integer_infix_expression(operator: &String, left: Box<dyn Object>, right
                 _ => new_error(format!("unknown operator: {} {} {}", left.type_of(), operator, right.type_of())),
             }
         },
-        _ => new_error(format!("unknown operator: {} {} {}", left.type_of(), operator, right.type_of()))
+        _ => Box::new(Null::new()),
     }
 }
 
@@ -446,25 +360,15 @@ fn eval_hash_literal(hash: &HashLiteral, env: Rc<RefCell<Environment>>) -> Box<d
 }
 
 fn apply_function(fun: Box<dyn Object>, args: Vec<Box<dyn Object>>) -> Box<dyn Object> {
-    match fun.type_of().as_str() {
-        "FUNCTION" => {
-            match fun.as_any().downcast_ref::<Function>() {
-                Some(f) => {
-                    let extended_env = extend_function_env(&f, args);
-                    let evaluated = eval(Box::new(f.body.as_base()), Rc::new(RefCell::new(extended_env)));
+    if let Some(f) = fun.as_any().downcast_ref::<Function>() {
+        let extended_env = extend_function_env(&f, args);
+        let evaluated = eval(Box::new(f.body.as_base()), Rc::new(RefCell::new(extended_env)));
 
-                    return unwrap_return_value(evaluated);
-                },
-                None => new_error(format!("not a function: {}", fun.type_of())),
-            }
-        },
-        "BUILTIN" => {
-            match fun.as_any().downcast_ref::<Builtin>() {
-                Some(b) => return b.call(&args),
-                None => new_error(format!("not a function: {}", fun.type_of())),
-            }
-        },
-        _ => new_error(format!("not a function: {}", fun.type_of())),
+        unwrap_return_value(evaluated)
+    } else if let Some(b) = fun.as_any().downcast_ref::<Builtin>() {
+        b.call(&args)
+    } else {
+        new_error(format!("not a function: {}", fun.type_of()))
     }
 }
 
@@ -486,15 +390,12 @@ fn unwrap_return_value(obj: Box<dyn Object>) -> Box<dyn Object> {
 }
 
 fn is_truthy(obj: Box<dyn Object>) -> bool {
-    match obj.type_of().as_str() {
-        NULL_OBJ => false,
-        BOOLEAN_OBJ => {
-            match obj.as_any().downcast_ref::<Boolean>() {
-                Some(o) => o.value,
-                None => false,
-            }
-        },
-        _ => true,
+    if let Some(_) = obj.as_any().downcast_ref::<Null>() {
+        false
+    } else if let Some(o) = obj.as_any().downcast_ref::<Boolean>() {
+        o.value
+    } else {
+        true
     }
 }
 
@@ -516,7 +417,7 @@ mod tests {
     use super::super::parser::Parser;
 
     #[test]
-    fn verify_integer_expressions_are_evaluated() {
+    fn test_eval_integer_expression() {
         struct IntegerTest {
             input: String,
             expected: i64,
@@ -541,16 +442,16 @@ mod tests {
         ];
 
         for integer_test in integer_tests {
-            let evaluated = get_eval(&integer_test.input);
+            let evaluated = test_eval(&integer_test.input);
             match evaluated {
-                Some(eval) => verify_integer_object(&eval, integer_test.expected),
+                Some(eval) => test_integer_object(&eval, integer_test.expected),
                 None => assert!(false, "Integer expression could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_boolean_expressions_are_evaluated() {
+    fn test_eval_boolean_expression() {
         struct BooleanTest {
             input: String,
             expected: bool,
@@ -579,16 +480,16 @@ mod tests {
         ];
 
         for boolean_test in boolean_tests {
-            let evaluated = get_eval(&boolean_test.input);
+            let evaluated = test_eval(&boolean_test.input);
             match evaluated {
-                Some(eval) => verify_boolean_object(&eval, boolean_test.expected),
+                Some(eval) => test_boolean_object(&eval, boolean_test.expected),
                 None => assert!(false, "Boolean expression could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_bang_operators_are_evaluated() {
+    fn test_bang_operator() {
         struct BangTest {
             input: String,
             expected: bool,
@@ -604,16 +505,16 @@ mod tests {
         ];
 
         for bang_test in bang_tests {
-            let evaluated = get_eval(&bang_test.input);
+            let evaluated = test_eval(&bang_test.input);
             match evaluated {
-                Some(eval) => verify_boolean_object(&eval, bang_test.expected),
+                Some(eval) => test_boolean_object(&eval, bang_test.expected),
                 None => assert!(false, "Boolean expression could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_if_else_expressions_are_evaluated() {
+    fn test_if_else_expressions() {
         struct IfElseTest {
             input: String,
             expected: Option<i64>,
@@ -630,21 +531,21 @@ mod tests {
         ];
 
         for if_else_test in if_else_tests {
-            let evaluated = get_eval(&if_else_test.input);
+            let evaluated = test_eval(&if_else_test.input);
             match evaluated {
                 Some(eval) => {
                     match if_else_test.expected {
-                        Some(e) => verify_integer_object(&eval, e),
-                        None => verify_null_object(&eval),
+                        Some(e) => test_integer_object(&eval, e),
+                        None => test_null_object(&eval),
                     };
                 },
-                None => assert!(false, "If-Else expression could not be evaluated."),
+                None => assert!(false, "If expression could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_return_statements_are_evaluated() {
+    fn test_return_statements() {
         struct ReturnTest {
             input: String,
             expected: i64,
@@ -666,16 +567,16 @@ mod tests {
         ];
 
         for return_test in return_tests {
-            let evaluated = get_eval(&return_test.input);
+            let evaluated = test_eval(&return_test.input);
             match evaluated {
-                Some(eval) => verify_integer_object(&eval, return_test.expected),
+                Some(eval) => test_integer_object(&eval, return_test.expected),
                 None => assert!(false, "Return statement could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_errors_are_handled() {
+    fn test_error_handling() {
         struct ErrorTest {
             input: String,
             expected_message: String,
@@ -702,7 +603,7 @@ mod tests {
         ];
 
         for error_test in error_tests {
-            let evaluated = get_eval(&error_test.input);
+            let evaluated = test_eval(&error_test.input);
             match evaluated {
                 Some(eval) => {
                     match eval.as_any().downcast_ref::<Error>() {
@@ -716,7 +617,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_let_statements_are_evaluated() {
+    fn test_let_statements() {
         struct LetTest {
             input: String,
             expected: i64,
@@ -730,20 +631,20 @@ mod tests {
         ];
 
         for let_test in let_tests {
-            let evaluated = get_eval(&let_test.input);
+            let evaluated = test_eval(&let_test.input);
             match evaluated {
-                Some(eval) => verify_integer_object(&eval, let_test.expected),
+                Some(eval) => test_integer_object(&eval, let_test.expected),
                 None => assert!(false, "Integer expression could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_function_objects_are_evaluated() {
+    fn test_function_object() {
         let input = String::from("fn(x) { x + 2; };");
         let expected_body = String::from("(x + 2)");
 
-        let evaluated = get_eval(&input);
+        let evaluated = test_eval(&input);
         match evaluated {
             Some(eval) => {
                 match eval.as_any().downcast_ref::<Function>() {
@@ -760,7 +661,7 @@ mod tests {
     }
 
     #[test]
-    fn verify_functions_are_applied() {
+    fn test_function_application() {
         struct FunctionTest {
             input: String,
             expected: i64,
@@ -776,16 +677,38 @@ mod tests {
         ];
 
         for function_test in function_tests {
-            let evaluated = get_eval(&function_test.input);
+            let evaluated = test_eval(&function_test.input);
             match evaluated {
-                Some(eval) => verify_integer_object(&eval, function_test.expected),
+                Some(eval) => test_integer_object(&eval, function_test.expected),
                 None => assert!(false, "Integer expression could not be evaluated."),
             }
         }
     }
 
     #[test]
-    fn verify_closures_are_evaluated() {
+    fn test_enclosing_environments() {
+        let input = String::from(r#"
+let first = 10;
+let second = 10;
+let third = 10;
+
+let ourFunction = fn(first) {
+  let second = 20;
+
+  first + second + third;
+};
+
+ourFunction(20) + first + second;"#);
+
+        let evaluated = test_eval(&input);
+        match evaluated {
+            Some(eval) => test_integer_object(&eval, 70),
+            None => assert!(false, "Enclosure could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn test_closures() {
         let input = String::from(r#"
 let newAdder = fn(x) {
   fn(y) { x + y };
@@ -794,18 +717,18 @@ let newAdder = fn(x) {
 let addTwo = newAdder(2);
 addTwo(2);"#);
 
-        let evaluated = get_eval(&input);
+        let evaluated = test_eval(&input);
         match evaluated {
-            Some(eval) => verify_integer_object(&eval, 4),
+            Some(eval) => test_integer_object(&eval, 4),
             None => assert!(false, "Function object could not be evaluated."),
         }
     }
 
     #[test]
-    fn verify_string_literals_are_evaluated() {
+    fn test_string_literal() {
         let input = String::from("\"Hello World!\"");
 
-        let evaluated = get_eval(&input);
+        let evaluated = test_eval(&input);
         match evaluated {
             Some(eval) => {
                 match eval.as_any().downcast_ref::<StringObject>() {
@@ -818,10 +741,10 @@ addTwo(2);"#);
     }
 
     #[test]
-    fn verify_strings_are_concatenated() {
+    fn test_string_concatenation() {
         let input = String::from("\"Hello\" + \" \" + \"World!\"");
 
-        let evaluated = get_eval(&input);
+        let evaluated = test_eval(&input);
         match evaluated {
             Some(eval) => {
                 match eval.as_any().downcast_ref::<StringObject>() {
@@ -834,7 +757,7 @@ addTwo(2);"#);
     }
 
     #[test]
-    fn verify_builtin_functions_are_evaluated() {
+    fn test_builtin_functions() {
         struct BuiltinTest {
             input: String,
             expected: Box<dyn Object>,
@@ -861,43 +784,25 @@ addTwo(2);"#);
         ];
 
         for builtin_test in builtin_tests {
-            let evaluated = get_eval(&builtin_test.input);
+            let evaluated = test_eval(&builtin_test.input);
             match evaluated {
                 Some(eval) => {
-                    match builtin_test.expected.type_of().as_str() {
-                        "INTEGER" => {
-                            match (eval.as_any().downcast_ref::<Integer>(), builtin_test.expected.as_any().downcast_ref::<Integer>()) {
-                                (Some(_), Some(ex)) => verify_integer_object(&eval, ex.value),
-                                _ => assert!(false, "Object is not an Integer"),
+                    if let (Some(_), Some(ex)) = (eval.as_any().downcast_ref::<Integer>(), builtin_test.expected.as_any().downcast_ref::<Integer>()) {
+                        test_integer_object(&eval, ex.value)
+                    } else if let (Some(ev), Some(ex)) = (eval.as_any().downcast_ref::<Error>(), builtin_test.expected.as_any().downcast_ref::<Error>()) {
+                        assert_eq!(ev.message, ex.message)
+                    } else if let Some(_) = eval.as_any().downcast_ref::<Null>() {
+                        test_null_object(&eval)
+                    } else if let (Some(ev), Some(ex)) = (eval.as_any().downcast_ref::<Array>(), builtin_test.expected.as_any().downcast_ref::<Array>()) {
+                        assert_eq!(ev.elements.len(), ex.elements.len());
+                        for (i, element) in ex.elements.iter().enumerate() {
+                            match ex.elements[i].as_any().downcast_ref::<Integer>() {
+                                Some(i) => test_integer_object(&element, i.value),
+                                None => assert!(false, "Object is not an Integer."),
                             }
-                        },
-                        "ERROR" => {
-                            match (eval.as_any().downcast_ref::<Error>(), builtin_test.expected.as_any().downcast_ref::<Error>()) {
-                                (Some(ev), Some(ex)) => assert_eq!(ev.message, ex.message),
-                                _ => assert!(false, "Object is not an Error"),
-                            }
-                        },
-                        "NULL" => {
-                            match eval.as_any().downcast_ref::<Null>() {
-                                Some(_) => verify_null_object(&eval),
-                                _ => assert!(false, "Object is not Null"),
-                            }
-                        },
-                        "ARRAY" => {
-                            match (eval.as_any().downcast_ref::<Array>(), builtin_test.expected.as_any().downcast_ref::<Array>()) {
-                                (Some(ev), Some(ex)) => {
-                                    assert_eq!(ev.elements.len(), ex.elements.len());
-                                    for (i, element) in ex.elements.iter().enumerate() {
-                                        match ex.elements[i].as_any().downcast_ref::<Integer>() {
-                                            Some(i) => verify_integer_object(&element, i.value),
-                                            None => assert!(false, "Object is not an Integer"),
-                                        }
-                                    }
-                                },
-                                _ => assert!(false, "Object is not an Array"),
-                            }
-                        },
-                        _ => assert!(false, "Type could not be determined."),
+                        }
+                    } else {
+                        assert!(false, "Type could not be determined.")
                     }
                 },
                 None => assert!(false, "Integer expression could not be evaluated."),
@@ -906,18 +811,18 @@ addTwo(2);"#);
     }
 
     #[test]
-    fn verify_array_literals_are_evaluated() {
+    fn test_array_literals() {
         let input = String::from("[1, 2 * 2, 3 + 3]");
 
-        let evaluated = get_eval(&input);
+        let evaluated = test_eval(&input);
         match evaluated {
             Some(eval) => {
                 match eval.as_any().downcast_ref::<Array>() {
                     Some(e) => {
                         assert_eq!(e.elements.len(), 3);
-                        verify_integer_object(&e.elements[0], 1);
-                        verify_integer_object(&e.elements[1], 4);
-                        verify_integer_object(&e.elements[2], 6);
+                        test_integer_object(&e.elements[0], 1);
+                        test_integer_object(&e.elements[1], 4);
+                        test_integer_object(&e.elements[2], 6);
                     },
                     None => assert!(false, "Object is not an Array."),
                 }
@@ -927,7 +832,7 @@ addTwo(2);"#);
     }
 
     #[test]
-    fn verify_array_index_expressions_are_evaluated() {
+    fn test_array_index_expressions() {
         struct IndexTest {
             input: String,
             expected: Box<dyn Object>,
@@ -947,23 +852,15 @@ addTwo(2);"#);
         ];
 
         for index_test in index_tests {
-            let evaluated = get_eval(&index_test.input);
+            let evaluated = test_eval(&index_test.input);
             match evaluated {
                 Some(eval) => {
-                    match index_test.expected.type_of().as_str() {
-                        "INTEGER" => {
-                            match (eval.as_any().downcast_ref::<Integer>(), index_test.expected.as_any().downcast_ref::<Integer>()) {
-                                (Some(_), Some(ex)) => verify_integer_object(&eval, ex.value),
-                                _ => assert!(false, "Object is not an Integer"),
-                            }
-                        },
-                        "NULL" => {
-                            match eval.as_any().downcast_ref::<Null>() {
-                                Some(_) => verify_null_object(&eval),
-                                _ => assert!(false, "Object is not Null"),
-                            }
-                        },
-                        _ => assert!(false, "Type could not be determined."),
+                    if let (Some(_), Some(ex)) = (eval.as_any().downcast_ref::<Integer>(), index_test.expected.as_any().downcast_ref::<Integer>()) {
+                        test_integer_object(&eval, ex.value)
+                    } else if let Some(_) = eval.as_any().downcast_ref::<Null>() {
+                        test_null_object(&eval)
+                    } else {
+                        assert!(false, "Type could not be determined.")
                     }
                 },
                 None => assert!(false, "Index expression could not be evaluated."),
@@ -972,7 +869,7 @@ addTwo(2);"#);
     }
 
     #[test]
-    fn verify_hash_literals_are_evaluated() {
+    fn test_hash_literals() {
         let input = String::from(r#"let two = "two";
 {
     "one": 10 - 9,
@@ -991,7 +888,7 @@ addTwo(2);"#);
         expected.insert(Boolean::new(true).hash_key(), 5);
         expected.insert(Boolean::new(false).hash_key(), 6);
 
-        let evaluated = get_eval(&input);
+        let evaluated = test_eval(&input);
         match evaluated {
             Some(eval) => {
                 match eval.as_any().downcast_ref::<HashObject>() {
@@ -999,7 +896,7 @@ addTwo(2);"#);
                         assert_eq!(e.pairs.len(), expected.len());
                         for (expected_key, expected_value) in expected {
                             let pair = &e.pairs[&expected_key];
-                            verify_integer_object(&pair.value, expected_value);
+                            test_integer_object(&pair.value, expected_value);
                         }
                     },
                     None => assert!(false, "Object is not a HashObject."),
@@ -1010,7 +907,7 @@ addTwo(2);"#);
     }
 
     #[test]
-    fn verify_hash_index_expressions_are_evaluated() {
+    fn test_hash_index_expressions() {
         struct IndexTest {
             input: String,
             expected: Box<dyn Object>,
@@ -1027,23 +924,15 @@ addTwo(2);"#);
         ];
 
         for index_test in index_tests {
-            let evaluated = get_eval(&index_test.input);
+            let evaluated = test_eval(&index_test.input);
             match evaluated {
                 Some(eval) => {
-                    match index_test.expected.type_of().as_str() {
-                        "INTEGER" => {
-                            match (eval.as_any().downcast_ref::<Integer>(), index_test.expected.as_any().downcast_ref::<Integer>()) {
-                                (Some(_), Some(ex)) => verify_integer_object(&eval, ex.value),
-                                _ => assert!(false, "Object is not an Integer"),
-                            }
-                        },
-                        "NULL" => {
-                            match eval.as_any().downcast_ref::<Null>() {
-                                Some(_) => verify_null_object(&eval),
-                                _ => assert!(false, "Object is not Null"),
-                            }
-                        },
-                        _ => assert!(false, "Type could not be determined."),
+                    if let (Some(_), Some(ex)) = (eval.as_any().downcast_ref::<Integer>(), index_test.expected.as_any().downcast_ref::<Integer>()) {
+                        test_integer_object(&eval, ex.value)
+                    } else if let Some(_) = eval.as_any().downcast_ref::<Null>() {
+                        test_null_object(&eval)
+                    } else {
+                        assert!(false, "Type could not be determined.")
                     }
                 },
                 None => assert!(false, "Index expression could not be evaluated."),
@@ -1051,7 +940,7 @@ addTwo(2);"#);
         }
     }
 
-    fn get_eval(input: &String) -> Option<Box<dyn Object>> {
+    fn test_eval(input: &String) -> Option<Box<dyn Object>> {
         let lexer = Lexer::new(input.clone());
         let mut parser = Parser::new(lexer);
         let program = parser.parse_program();
@@ -1066,24 +955,24 @@ addTwo(2);"#);
         }
     }
 
-    fn verify_integer_object(object: &Box<dyn Object>, expected: i64) {
+    fn test_integer_object(object: &Box<dyn Object>, expected: i64) {
         match object.as_any().downcast_ref::<Integer>() {
             Some(o) => assert_eq!(o.value, expected),
-            None => assert!(false, "Object is not an Integer"),
+            None => assert!(false, "Object is not an Integer."),
         };
     }
 
-    fn verify_boolean_object(object: &Box<dyn Object>, expected: bool) {
+    fn test_boolean_object(object: &Box<dyn Object>, expected: bool) {
         match object.as_any().downcast_ref::<Boolean>() {
             Some(o) => assert_eq!(o.value, expected),
-            None => assert!(false, "Object is not a Boolean"),
+            None => assert!(false, "Object is not a Boolean."),
         };
     }
 
-    fn verify_null_object(object: &Box<dyn Object>) {
+    fn test_null_object(object: &Box<dyn Object>) {
         match object.as_any().downcast_ref::<Null>() {
             Some(_) => (),
-            None => assert!(false, "Object is not a Boolean"),
+            None => assert!(false, "Object is not Null."),
         };
     }
 }

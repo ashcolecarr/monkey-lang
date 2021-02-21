@@ -204,7 +204,7 @@ mod tests {
     use super::super::token::TokenType;
 
     #[test]
-    fn verifying_next_token_returns_token() {
+    fn test_next_token() {
         let input = String::from(r#"let five = 5;
 let ten = 10;
 
