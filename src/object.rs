@@ -2,6 +2,8 @@ use super::ast::*;
 use super::environment::Environment;
 use std::any::Any;
 use std::cell::RefCell;
+use std::collections::hash_map::{DefaultHasher, HashMap};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 pub const INTEGER_OBJ: &str = "INTEGER";
@@ -13,6 +15,7 @@ pub const FUNCTION_OBJ: &str = "FUNCTION";
 pub const STRING_OBJ: &str = "STRING";
 pub const BUILTIN_OBJ: &str = "BUILTIN";
 pub const ARRAY_OBJ: &str = "ARRAY";
+pub const HASH_OBJ: &str = "HASH";
 
 #[derive(Clone)]
 pub enum BuiltinFunction {
@@ -21,6 +24,7 @@ pub enum BuiltinFunction {
     Last,
     Rest,
     Push,
+    Puts,
 }
 
 type ObjectType = String;
@@ -35,6 +39,10 @@ pub trait ObjectClone {
     fn clone_box(&self) -> Box<dyn Object>;
 }
 
+pub trait ObjectHashKey {
+    fn hash_key(&self) -> HashKey;
+}
+
 impl <T: 'static + Object + Clone> ObjectClone for T {
     fn clone_box(&self) -> Box<dyn Object> {
         Box::new(self.clone())
@@ -44,6 +52,30 @@ impl <T: 'static + Object + Clone> ObjectClone for T {
 impl Clone for Box<dyn Object> {
     fn clone(&self) -> Box<dyn Object> {
         self.clone_box()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct HashKey {
+    pub obj_type: ObjectType,
+    pub value: u64,
+}
+
+impl HashKey {
+    pub fn new(obj_type: ObjectType, value: u64) -> Self {
+        Self { obj_type, value }
+    }
+}
+
+#[derive(Clone)]
+pub struct HashPair {
+    pub key: Box<dyn Object>,
+    pub value: Box<dyn Object>,
+}
+
+impl HashPair {
+    pub fn new(key: Box<dyn Object>, value: Box<dyn Object>) -> Self {
+        Self { key, value }
     }
 }
 
@@ -72,6 +104,12 @@ impl Object for Integer {
     }
 }
 
+impl ObjectHashKey for Integer {
+    fn hash_key(&self) -> HashKey {
+        HashKey::new(self.type_of(), self.value as u64)
+    }
+}
+
 #[derive(Clone)]
 pub struct Boolean {
     pub value: bool,
@@ -94,6 +132,13 @@ impl Object for Boolean {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+impl ObjectHashKey for Boolean {
+    fn hash_key(&self) -> HashKey {
+        let value = if self.value { 1 } else { 0 };
+        HashKey::new(self.type_of(), value)
     }
 }
 
@@ -211,7 +256,7 @@ impl StringObject {
 
 impl Object for StringObject {
     fn type_of(&self) -> ObjectType {
-        STRING_OBJ.to_string()
+        STRING_OBJ.to_string() 
     }
 
     fn inspect(&self) -> String {
@@ -220,6 +265,15 @@ impl Object for StringObject {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+impl ObjectHashKey for StringObject {
+    fn hash_key(&self) -> HashKey {
+        let mut s = DefaultHasher::new();
+        self.value.hash(&mut s);
+
+        HashKey::new(self.type_of(), s.finish())
     }
 }
 
@@ -236,6 +290,7 @@ impl Builtin {
             "last" => Some(Self { builtin_function: BuiltinFunction::Last }),
             "rest" => Some(Self { builtin_function: BuiltinFunction::Rest }),
             "push" => Some(Self { builtin_function: BuiltinFunction::Push }),
+            "puts" => Some(Self { builtin_function: BuiltinFunction::Puts }),
             _ => None,
         }
     }
@@ -317,6 +372,13 @@ impl Builtin {
                     _ => Box::new(Error::new(format!("argument to 'push' must be ARRAY, got {}", args[0].type_of()))),
                 }
             },
+            BuiltinFunction::Puts => {
+                for arg in args {
+                    println!("{}", arg.inspect());
+                }
+
+                Box::new(Null::new())
+            },
         }
     }
 }
@@ -358,5 +420,75 @@ impl Object for Array {
 
     fn as_any(&self) -> &dyn Any {
         self
+    }
+}
+
+#[derive(Clone)]
+pub struct HashObject {
+    pub pairs: HashMap<HashKey, HashPair>,
+}
+
+impl HashObject {
+    pub fn new(pairs: HashMap<HashKey, HashPair>) -> Self {
+        Self { pairs }
+    }
+}
+
+impl Object for HashObject {
+    fn type_of(&self) -> ObjectType {
+        HASH_OBJ.to_string() 
+    }
+
+    fn inspect(&self) -> String {
+        let mut pairs = vec![];
+        for (_, pair) in &self.pairs {
+            pairs.push(format!("{}: {}", pair.key.inspect(), pair.value.inspect()));
+        }
+        format!("{{{}}}", pairs.join(", "))
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn verify_string_hash_key() {
+        let hello1 = StringObject::new(String::from("Hello World"));
+        let hello2 = StringObject::new(String::from("Hello World"));
+        let diff1 = StringObject::new(String::from("My name is johnny"));
+        let diff2 = StringObject::new(String::from("My name is johnny"));
+
+        assert_eq!(hello1.hash_key(), hello2.hash_key());
+        assert_eq!(diff1.hash_key(), diff2.hash_key());
+        assert_ne!(hello1.hash_key(), diff1.hash_key());
+    }
+
+    #[test]
+    fn verify_boolean_hash_key() {
+        let true1 = Boolean::new(true);
+        let true2 = Boolean::new(true);
+        let false1 = Boolean::new(false);
+        let false2 = Boolean::new(false);
+
+        assert_eq!(true1.hash_key(), true2.hash_key());
+        assert_eq!(false1.hash_key(), false2.hash_key());
+        assert_ne!(true1.hash_key(), false1.hash_key());
+    }
+
+    #[test]
+    fn verify_integer_hash_key() {
+        let one1 = Integer::new(1);
+        let one2 = Integer::new(1);
+        let two1 = Integer::new(2);
+        let two2 = Integer::new(2);
+
+        assert_eq!(one1.hash_key(), one2.hash_key());
+        assert_eq!(two1.hash_key(), two2.hash_key());
+        assert_ne!(one1.hash_key(), two1.hash_key());
     }
 }

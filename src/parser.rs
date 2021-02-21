@@ -50,6 +50,7 @@ impl Parser {
         parser.prefix_parse_fns.insert(TokenType::Function, Self::parse_function_literal);
         parser.prefix_parse_fns.insert(TokenType::String, Self::parse_string_literal);
         parser.prefix_parse_fns.insert(TokenType::LBracket, Self::parse_array_literal);
+        parser.prefix_parse_fns.insert(TokenType::LBrace, Self::parse_hash_literal);
 
         parser.infix_parse_fns.insert(TokenType::Plus, Self::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Minus, Self::parse_infix_expression);
@@ -352,6 +353,38 @@ impl Parser {
             Some(e) => Some(Box::new(ArrayLiteral::new(current_token, e))),
             None => None,
         }
+    }
+
+    fn parse_hash_literal(&mut self) -> Option<Box<dyn Expression>> {
+        let current_token = self.current_token.clone();
+        let mut pairs: HashMap<Box<dyn Expression>, Box<dyn Expression>> = HashMap::new();
+
+        while !self.peek_token_is(&TokenType::RBrace) {
+            self.next_token();
+            let key = self.parse_expression(&Precedence::Lowest);
+
+            if !self.expect_peek(&TokenType::Colon) {
+                return None;
+            }
+
+            self.next_token();
+            let value = self.parse_expression(&Precedence::Lowest);
+
+            match (key, value) {
+                (Some(k), Some(v)) => pairs.insert(k, v),
+                _ => return None,
+            };
+
+            if !self.peek_token_is(&TokenType::RBrace) && !self.expect_peek(&TokenType::Comma) {
+                return None;
+            }
+        }
+
+        if !self.expect_peek(&TokenType::RBrace) {
+            return None;
+        }
+
+        Some(Box::new(HashLiteral::new(current_token, pairs)))
     }
 
     fn parse_function_parameters(&mut self) -> Option<Vec<Box<dyn Expression>>> {
@@ -1184,6 +1217,204 @@ return 993322;"#);
                         verify_infix_expression(&idx.index, 1, &String::from("+"), 1);
                     },
                     None => assert!(false, "Not an IndexExpression")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_hash_literals_string_keys_are_parsed() {
+        let input = String::from("{\"one\": 1, \"two\": 2, \"three\": 3}");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let mut expected: HashMap<String, i64> = HashMap::new();
+        expected.insert(String::from("one"), 1);
+        expected.insert(String::from("two"), 2);
+        expected.insert(String::from("three"), 3);
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<HashLiteral>() {
+                    Some(hash_lit) => {
+                        assert_eq!(hash_lit.pairs.len(), expected.len());
+                        for (key, value) in &hash_lit.pairs {
+                            match key.as_any().downcast_ref::<StringLiteral>() {
+                                Some(k) => {
+                                    let expected_value = expected[&k.value];
+                                    verify_integer_literal(&value, expected_value);
+                                },
+                                None => assert!(false, "Key is a not a StringLiteral"),
+                            }
+                        }
+                    },
+                    None => assert!(false, "Not a HashLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_empty_hash_literals_are_parsed() {
+        let input = String::from("{}");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<HashLiteral>() {
+                    Some(hash_lit) =>  assert_eq!(hash_lit.pairs.len(), 0),
+                    None => assert!(false, "Not a HashLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_hash_literals_boolean_keys_are_parsed() {
+        let input = String::from("{true: 1, false: 2}");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let mut expected: HashMap<bool, i64> = HashMap::new();
+        expected.insert(true, 1);
+        expected.insert(false, 2);
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<HashLiteral>() {
+                    Some(hash_lit) => {
+                        assert_eq!(hash_lit.pairs.len(), expected.len());
+                        for (key, value) in &hash_lit.pairs {
+                            match key.as_any().downcast_ref::<BooleanLiteral>() {
+                                Some(k) => {
+                                    let expected_value = expected[&k.value];
+                                    verify_integer_literal(&value, expected_value);
+                                },
+                                None => assert!(false, "Key is a not a BooleanLiteral"),
+                            }
+                        }
+                    },
+                    None => assert!(false, "Not a HashLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_hash_literals_integer_keys_are_parsed() {
+        let input = String::from("{1: 1, 2: 2, 3: 3}");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let mut expected: HashMap<i64, i64> = HashMap::new();
+        expected.insert(1, 1);
+        expected.insert(2, 2);
+        expected.insert(3, 3);
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<HashLiteral>() {
+                    Some(hash_lit) => {
+                        assert_eq!(hash_lit.pairs.len(), expected.len());
+                        for (key, value) in &hash_lit.pairs {
+                            match key.as_any().downcast_ref::<IntegerLiteral>() {
+                                Some(k) => {
+                                    let expected_value = expected[&k.value];
+                                    verify_integer_literal(&value, expected_value);
+                                },
+                                None => assert!(false, "Key is a not a IntegerLiteral"),
+                            }
+                        }
+                    },
+                    None => assert!(false, "Not a HashLiteral")
+                }
+            },
+            None => assert!(false, "Expression statement was not returned."),
+        };
+    }
+
+    #[test]
+    fn verify_hash_literals_with_expressions_are_parsed() {
+        struct ExpTest {
+            left: i64,
+            operator: String,
+            right: i64,
+        };
+        let input = String::from("{\"one\": 0 + 1, \"two\": 10 - 8, \"three\": 15 / 5}");
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+        match &program {
+            Some(p) => assert_eq!(p.statements.len(), 1),
+            None => assert!(false, "parse_program() returned None."),
+        };
+
+        let mut expected: HashMap<String, ExpTest> = HashMap::new();
+        expected.insert(String::from("one"), ExpTest { left: 0, operator: String::from("+"), right: 1 });
+        expected.insert(String::from("two"), ExpTest { left: 10, operator: String::from("-"), right: 8 });
+        expected.insert(String::from("three"), ExpTest { left: 15, operator: String::from("/"), right: 5 });
+
+        let stmt = &program.unwrap().statements[0];
+        match stmt.expression() {
+            Some(e) => {
+                match e.as_any().downcast_ref::<HashLiteral>() {
+                    Some(hash_lit) => {
+                        assert_eq!(hash_lit.pairs.len(), expected.len());
+                        for (key, value) in &hash_lit.pairs {
+                            match (key.as_any().downcast_ref::<StringLiteral>(), value.as_any().downcast_ref::<InfixExpression>()) {
+                                (Some(k), Some(_)) => {
+                                    let expected_value = &expected[&k.value];
+                                    verify_infix_expression(&value, expected_value.left, &expected_value.operator, expected_value.right);
+                                },
+                                _ => assert!(false, "Key is a not a StringLiteral"),
+                            }
+                        }
+                    },
+                    None => assert!(false, "Not a HashLiteral")
                 }
             },
             None => assert!(false, "Expression statement was not returned."),

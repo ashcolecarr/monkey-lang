@@ -76,6 +76,7 @@ impl Lexer {
             },
             '[' => TokenType::LBracket,
             ']' => TokenType::RBracket,
+            ':' => TokenType::Colon,
             '\0' => TokenType::Eof,
             _ => {
                 if self.is_letter() {
@@ -228,7 +229,8 @@ if (5 < 10) {
 "hello \"world\""
 "hello\n world"
 "hello\t\t\tworld"
-[1, 2];"#);
+[1, 2];
+{"foo": "bar"}"#);
 
         struct TokenTest {
             expected_type: TokenType,
@@ -320,6 +322,11 @@ if (5 < 10) {
             TokenTest { expected_type: TokenType::Int, expected_literal: String::from("2") },
             TokenTest { expected_type: TokenType::RBracket, expected_literal: String::from("]") },
             TokenTest { expected_type: TokenType::Semicolon, expected_literal: String::from(";") },
+            TokenTest { expected_type: TokenType::LBrace, expected_literal: String::from("{") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("foo") },
+            TokenTest { expected_type: TokenType::Colon, expected_literal: String::from(":") },
+            TokenTest { expected_type: TokenType::String, expected_literal: String::from("bar") },
+            TokenTest { expected_type: TokenType::RBrace, expected_literal: String::from("}") },
             TokenTest { expected_type: TokenType::Eof, expected_literal: String::from("\0") },
         ];
 

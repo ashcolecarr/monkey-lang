@@ -1,5 +1,7 @@
 use super::token::Token;
 use std::any::Any;
+use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 pub trait Node: NodeClone + BaseTrait {
     fn token_literal(&self) -> String;
@@ -71,6 +73,20 @@ impl <T: 'static + Expression + Clone> ExpressionClone for T {
 impl Clone for Box<dyn Expression> {
     fn clone(&self) -> Box<dyn Expression> {
         self.clone_exp_box()
+    }
+}
+
+impl Eq for Box<dyn Expression> { }
+
+impl PartialEq for Box<dyn Expression> { 
+    fn eq(&self, other: &Self) -> bool {
+        self.value() == other.value()
+    }
+}
+
+impl Hash for Box<dyn Expression> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.value().hash(state);
     }
 }
 
@@ -380,7 +396,7 @@ impl Node for PrefixExpression {
 
 impl Expression for PrefixExpression {
     fn value(&self) -> String {
-        String::new()
+        format!("({}{})", &self.operator, &self.right.to_string())
     }
 }
 
@@ -419,7 +435,8 @@ impl Node for InfixExpression {
 
 impl Expression for InfixExpression {
     fn value(&self) -> String {
-        String::new()
+        format!("({} {} {})", &self.left.to_string(),
+            &self.operator, &self.right.to_string())
     }
 }
 
@@ -461,7 +478,11 @@ impl Node for IfExpression {
 
 impl Expression for IfExpression {
     fn value(&self) -> String {
-        String::new()
+        format!("(if {} {} {})", &self.condition.to_string(),
+            &self.consequence.to_string(), match &self.alternative {
+                Some(alt) => String::from("else ") + &alt.to_string(),
+                None => String::new(),
+            })
     }
 }
 
@@ -499,7 +520,8 @@ impl Node for FunctionLiteral {
 
 impl Expression for FunctionLiteral {
     fn value(&self) -> String {
-        String::new()
+        let params: Vec<String> = self.parameters.iter().map(|p| p.to_string()).collect();
+        format!("({}) {}", params.join(", "), self.body.to_string())
     }
 }
 
@@ -537,7 +559,8 @@ impl Node for CallExpression {
 
 impl Expression for CallExpression {
     fn value(&self) -> String {
-        String::new()
+        let args: Vec<String> = self.arguments.iter().map(|a| a.to_string()).collect();
+        format!("{}({})", self.function.to_string(), args.join(", "))
     }
 }
 
@@ -649,6 +672,50 @@ impl Node for IndexExpression {
 impl Expression for IndexExpression {
     fn value(&self) -> String {
         format!("({}[{}])", self.left.to_string(), self.index.to_string())
+    }
+}
+
+#[derive(Clone)]
+pub struct HashLiteral {
+    pub token: Token,
+    pub pairs: HashMap<Box<dyn Expression>, Box<dyn Expression>>,
+}
+
+impl HashLiteral {
+    pub fn new(token: Token, pairs: HashMap<Box<dyn Expression>, Box<dyn Expression>>) -> Self {
+        Self { token, pairs }
+    }
+}
+
+impl Node for HashLiteral {
+    fn token_literal(&self) -> String {
+        self.token.literal.clone()
+    }
+
+    fn to_string(&self) -> String {
+        let mut pairs = vec![];
+        for (key, value) in &self.pairs {
+            pairs.push(format!("{}:{}", key.to_string(), value.to_string()));
+        }
+        format!("{{{}}}", pairs.join(", "))
+    }
+
+    fn type_of(&self) -> &'static str {
+        "HashLiteral"
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+}
+
+impl Expression for HashLiteral {
+    fn value(&self) -> String {
+        let mut pairs = vec![];
+        for (key, value) in &self.pairs {
+            pairs.push(format!("{}:{}", key.to_string(), value.to_string()));
+        }
+        format!("{{{}}}", pairs.join(", "))
     }
 }
 

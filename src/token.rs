@@ -31,6 +31,7 @@ pub enum TokenType {
     RBrace,
     LBracket,
     RBracket,
+    Colon,
 
     // Keywords
     Function,

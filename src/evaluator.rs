@@ -2,6 +2,7 @@ use super::ast::*;
 use super::environment::Environment;
 use super::object::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub fn eval(node: Box<&dyn Node>, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
@@ -176,7 +177,13 @@ pub fn eval(node: Box<&dyn Node>, env: Rc<RefCell<Environment>>) -> Box<dyn Obje
                 },
                 None => new_error(format!("type error: expected {}", node.type_of())),
             }
-        }
+        },
+        "HashLiteral" => {
+            match node.as_any().downcast_ref::<HashLiteral>() {
+                Some(hl) => eval_hash_literal(&hl, env),
+                None => new_error(format!("type error: expected {}", node.type_of())),
+            }
+        },
         _ => new_error(String::from("type error: type not found")),
     }
 }
@@ -367,9 +374,12 @@ fn eval_expressions(exps: &Vec<Box<dyn Expression>>, env: Rc<RefCell<Environment
 }
 
 fn eval_index_expression(left: Box<dyn Object>, index: Box<dyn Object>) -> Box<dyn Object> {
-    match (left.as_any().downcast_ref::<Array>(), index.as_any().downcast_ref::<Integer>()) {
-        (Some(arr), Some(int)) => eval_array_index_expression(arr, int),
-        _ => new_error(format!("index operator not supported: {}", left.type_of())),
+    if let (Some(arr), Some(int)) = (left.as_any().downcast_ref::<Array>(), index.as_any().downcast_ref::<Integer>()) {
+        eval_array_index_expression(arr, int)
+    } else if let Some(hash) = left.as_any().downcast_ref::<HashObject>() {
+        eval_hash_index_expression(hash, &index)
+    } else {
+        new_error(format!("index operator not supported: {}", left.type_of()))
     }
 }
 
@@ -381,6 +391,58 @@ fn eval_array_index_expression(array: &Array, index: &Integer) -> Box<dyn Object
     } else {
         array.elements[index.value as usize].clone()
     }
+}
+
+fn eval_hash_index_expression(hash: &HashObject, index: &Box<dyn Object>) -> Box<dyn Object> {
+    // Check if the key is a hashable type, otherwise error out.
+    let hash_key;
+    if let Some(i) = index.as_any().downcast_ref::<Integer>() { 
+        hash_key = i.hash_key();
+    } else if let Some(b) = index.as_any().downcast_ref::<Boolean>() {
+        hash_key = b.hash_key();
+    } else if let Some(s) = index.as_any().downcast_ref::<StringObject>() {
+        hash_key = s.hash_key();
+    } else {
+        return new_error(format!("unusable as hash key: {}", index.type_of()));
+    }
+
+    let pair = hash.pairs.get(&hash_key);
+    match pair {
+        Some(p) => p.value.clone(),
+        None => Box::new(Null::new()),
+    }
+}
+
+fn eval_hash_literal(hash: &HashLiteral, env: Rc<RefCell<Environment>>) -> Box<dyn Object> {
+    let mut pairs: HashMap<HashKey, HashPair> = HashMap::new();
+
+    for (pair_key, pair_value) in &hash.pairs {
+        let key = eval(Box::new(pair_key.as_base()), Rc::clone(&env));
+        if is_error(&key) {
+            return key;
+        }
+
+        // Check if the key is a hashable type, otherwise error out.
+        let hashed;
+        if let Some(i) = key.as_any().downcast_ref::<Integer>() { 
+            hashed = i.hash_key();
+        } else if let Some(b) = key.as_any().downcast_ref::<Boolean>() {
+            hashed = b.hash_key();
+        } else if let Some(s) = key.as_any().downcast_ref::<StringObject>() {
+            hashed = s.hash_key();
+        } else {
+            return new_error(format!("unusable as hash key: {}", key.type_of()));
+        }
+
+        let value = eval(Box::new(pair_value.as_base()), Rc::clone(&env));
+        if is_error(&value) {
+            return value;
+        }
+
+        pairs.insert(hashed, HashPair::new(key.clone(), value.clone()));
+    }
+
+    Box::new(HashObject::new(pairs))
 }
 
 fn apply_function(fun: Box<dyn Object>, args: Vec<Box<dyn Object>>) -> Box<dyn Object> {
@@ -636,6 +698,7 @@ mod tests {
             ErrorTest { input: block_error, expected_message: String::from("unknown operator: BOOLEAN + BOOLEAN") },
             ErrorTest { input: String::from("foobar"), expected_message: String::from("identifier not found: foobar") },
             ErrorTest { input: String::from("\"Hello\" - \"World!\""), expected_message: String::from("unknown operator: STRING - STRING") },
+            ErrorTest { input: String::from("{\"name\": \"Monkey\"}[fn(x) { x }];"), expected_message: String::from("unusable as hash key: FUNCTION") },
         ];
 
         for error_test in error_tests {
@@ -881,6 +944,86 @@ addTwo(2);"#);
             IndexTest { input: String::from("let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i]"), expected: Box::new(Integer::new(2)) },
             IndexTest { input: String::from("[1, 2, 3][3]"), expected: Box::new(Null::new()) },
             IndexTest { input: String::from("[1, 2, 3][-1]"), expected: Box::new(Null::new()) },
+        ];
+
+        for index_test in index_tests {
+            let evaluated = get_eval(&index_test.input);
+            match evaluated {
+                Some(eval) => {
+                    match index_test.expected.type_of().as_str() {
+                        "INTEGER" => {
+                            match (eval.as_any().downcast_ref::<Integer>(), index_test.expected.as_any().downcast_ref::<Integer>()) {
+                                (Some(_), Some(ex)) => verify_integer_object(&eval, ex.value),
+                                _ => assert!(false, "Object is not an Integer"),
+                            }
+                        },
+                        "NULL" => {
+                            match eval.as_any().downcast_ref::<Null>() {
+                                Some(_) => verify_null_object(&eval),
+                                _ => assert!(false, "Object is not Null"),
+                            }
+                        },
+                        _ => assert!(false, "Type could not be determined."),
+                    }
+                },
+                None => assert!(false, "Index expression could not be evaluated."),
+            }
+        }
+    }
+
+    #[test]
+    fn verify_hash_literals_are_evaluated() {
+        let input = String::from(r#"let two = "two";
+{
+    "one": 10 - 9,
+    two: 1 + 1,
+    "thr" + "ee": 6 / 2,
+    4: 4,
+    true: 5,
+    false: 6
+}"#);
+
+        let mut expected: HashMap<HashKey, i64> = HashMap::new();
+        expected.insert(StringObject::new(String::from("one")).hash_key(), 1);
+        expected.insert(StringObject::new(String::from("two")).hash_key(), 2);
+        expected.insert(StringObject::new(String::from("three")).hash_key(), 3);
+        expected.insert(Integer::new(4).hash_key(), 4);
+        expected.insert(Boolean::new(true).hash_key(), 5);
+        expected.insert(Boolean::new(false).hash_key(), 6);
+
+        let evaluated = get_eval(&input);
+        match evaluated {
+            Some(eval) => {
+                match eval.as_any().downcast_ref::<HashObject>() {
+                    Some(e) => {
+                        assert_eq!(e.pairs.len(), expected.len());
+                        for (expected_key, expected_value) in expected {
+                            let pair = &e.pairs[&expected_key];
+                            verify_integer_object(&pair.value, expected_value);
+                        }
+                    },
+                    None => assert!(false, "Object is not a HashObject."),
+                }
+            },
+            None => assert!(false, "Hash object could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn verify_hash_index_expressions_are_evaluated() {
+        struct IndexTest {
+            input: String,
+            expected: Box<dyn Object>,
+        };
+
+        let index_tests = vec![
+            IndexTest { input: String::from("{\"foo\": 5}[\"foo\"]"), expected: Box::new(Integer::new(5)) },
+            IndexTest { input: String::from("{\"foo\": 5}[\"bar\"]"), expected: Box::new(Null::new()) },
+            IndexTest { input: String::from("let key = \"foo\"; {\"foo\": 5}[key]"), expected: Box::new(Integer::new(5)) },
+            IndexTest { input: String::from("{}[\"foo\"]"), expected: Box::new(Null::new()) },
+            IndexTest { input: String::from("{5: 5}[5]"), expected: Box::new(Integer::new(5)) },
+            IndexTest { input: String::from("{true: 5}[true]"), expected: Box::new(Integer::new(5)) },
+            IndexTest { input: String::from("{false: 5}[false]"), expected: Box::new(Integer::new(5)) },
         ];
 
         for index_test in index_tests {
