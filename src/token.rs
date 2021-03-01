@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter, Result};
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum TokenType {
     Illegal,
     Eof,
@@ -41,11 +41,39 @@ pub enum TokenType {
 
 impl Display for TokenType {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
-        write!(f, "{:?}", self)
+        write!(f, "{}", match self {
+            TokenType::Illegal => "illegal",
+            TokenType::Eof => "eof",
+            TokenType::Ident => "ident",
+            TokenType::Int => "int",
+            TokenType::Assign => "=",
+            TokenType::Plus => "+",
+            TokenType::Minus => "-",
+            TokenType::Bang => "!",
+            TokenType::Asterisk => "*",
+            TokenType::Slash => "/",
+            TokenType::Lt => "<",
+            TokenType::Gt => ">",
+            TokenType::Eq => "==",
+            TokenType::NotEq => "!=",
+            TokenType::Comma => ",",
+            TokenType::Semicolon => ";",
+            TokenType::LParen => "(",
+            TokenType::RParen => ")",
+            TokenType::LBrace => "{",
+            TokenType::RBrace => "}",
+            TokenType::Function => "function",
+            TokenType::Let => "let",
+            TokenType::True => "true",
+            TokenType::False => "false",
+            TokenType::If => "if",
+            TokenType::Else => "else",
+            TokenType::Return => "return",
+        })
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Token {
     pub token_type: TokenType,
     pub literal: String,

@@ -1,10 +1,10 @@
 use super::token::{Token, TokenType};
 
 pub struct Lexer {
-    pub input: Vec<char>,
-    pub position: usize,
-    pub read_position: usize,
-    pub ch: char,
+    input: Vec<char>,
+    position: usize,
+    read_position: usize,
+    ch: char,
 }
 
 impl Lexer {
