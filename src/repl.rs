@@ -1,6 +1,7 @@
 use super::lexer::Lexer;
+use super::MONKEY_FACE;
+use super::parser::Parser;
 use super::PROMPT;
-use super::token::TokenType;
 use std::io::{stdin, stdout, Write};
 
 pub fn start() {
@@ -16,19 +17,32 @@ pub fn start() {
                     break;
                 }
 
-                let mut lexer = Lexer::new(line.as_str());
+                let lexer = Lexer::new(line.as_str());
+                let mut parser = Parser::new(lexer);
+                let program = parser.parse_program();
+                let parser_errors = parser.errors();
 
-                loop {
-                    let token = lexer.next_token();
-                    if token.token_type == TokenType::Eof {
-                        break;
-                    }
+                if !parser_errors.is_empty() {
+                    print_parser_error(&parser_errors);
+                    line.clear();
+                    continue;
+                }
 
-                    println!("{}", token);
+                if let Some(p) = program {
+                    println!("{}", p);
                 }
             },
             Err(e) => eprintln!("Error: {}", e),
         };
         line.clear();
+    }
+}
+
+fn print_parser_error(errors: &Vec<String>) {
+    eprintln!("{}", MONKEY_FACE);
+    eprintln!("Whoops! We ran into some monkey business here!");
+    eprintln!(" Parser errors:");
+    for error in errors {
+        eprintln!("\t{}", error);
     }
 }

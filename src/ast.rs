@@ -27,10 +27,12 @@ impl Node {
     }
 }
 
+#[derive(Clone)]
 pub enum Statement {
     LetStatement(LetStatement),
     ReturnStatement(ReturnStatement),
     ExpressionStatement(ExpressionStatement),
+    BlockStatement(BlockStatement),
 }
 
 impl Display for Statement {
@@ -39,6 +41,7 @@ impl Display for Statement {
             Statement::LetStatement(ls) => format!("{}", ls),
             Statement::ReturnStatement(rs) => format!("{}", rs),
             Statement::ExpressionStatement(es) => format!("{}", es),
+            Statement::BlockStatement(bs) => format!("{}", bs),
         })
     }
 }
@@ -49,10 +52,12 @@ impl Statement {
             Statement::LetStatement(ls) => ls.token.literal.as_str(),
             Statement::ReturnStatement(rs) => rs.token.literal.as_str(),
             Statement::ExpressionStatement(es) => es.token.literal.as_str(),
+            Statement::BlockStatement(bs) => bs.token.literal.as_str(),
         }
     }
 }
 
+#[derive(Clone)]
 pub struct LetStatement {
     pub token: Token,
     pub name: Identifier,
@@ -76,6 +81,7 @@ impl LetStatement {
     }
 }
 
+#[derive(Clone)]
 pub struct ReturnStatement {
     pub token: Token,
     pub return_value: Option<Expression>,
@@ -98,6 +104,7 @@ impl ReturnStatement {
     }
 }
 
+#[derive(Clone)]
 pub struct ExpressionStatement {
     pub token: Token,
     pub expression: Option<Expression>,
@@ -120,12 +127,38 @@ impl ExpressionStatement {
 }
 
 #[derive(Clone)]
+pub struct BlockStatement {
+    pub token: Token,
+    pub statements: Vec<Statement>,
+}
+
+impl Display for BlockStatement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let mut output = String::new();
+        for statement in &self.statements {
+            output += format!("{}", statement).as_str();
+        }
+
+        write!(f, "{}", output)
+    }
+}
+
+impl BlockStatement {
+    pub fn new(token: Token, statements: Vec<Statement>) -> Self {
+        Self { token, statements }
+    }
+}
+
+#[derive(Clone)]
 pub enum Expression {
     Identifier(Identifier),
     IntegerLiteral(IntegerLiteral),
     PrefixExpression(PrefixExpression),
     InfixExpression(InfixExpression),
     Boolean(Boolean),
+    IfExpression(IfExpression),
+    FunctionLiteral(FunctionLiteral),
+    CallExpression(CallExpression),
 }
 
 impl Display for Expression {
@@ -136,6 +169,9 @@ impl Display for Expression {
             Expression::PrefixExpression(pe) => format!("{}", pe),
             Expression::InfixExpression(ie) => format!("{}", ie),
             Expression::Boolean(bl) => format!("{}", bl),
+            Expression::IfExpression(ie) => format!("{}", ie),
+            Expression::FunctionLiteral(fl) => format!("{}", fl),
+            Expression::CallExpression(ce) => format!("{}", ce),
         })
     }
 }
@@ -148,6 +184,9 @@ impl Expression {
             Expression::PrefixExpression(pe) => pe.token.literal.as_str(),
             Expression::InfixExpression(ie) => ie.token.literal.as_str(),
             Expression::Boolean(bl) => bl.token.literal.as_str(),
+            Expression::IfExpression(ie) => ie.token.literal.as_str(),
+            Expression::FunctionLiteral(fl) => fl.token.literal.as_str(),
+            Expression::CallExpression(ce) => ce.token.literal.as_str(),
         }
     }
 }
@@ -242,6 +281,71 @@ impl Display for Boolean {
 impl Boolean {
     pub fn new(token: Token, value: bool) -> Self {
         Boolean { token, value }
+    }
+}
+
+#[derive(Clone)]
+pub struct IfExpression {
+    pub token: Token,
+    pub condition: Box<Expression>,
+    pub consequence: BlockStatement,
+    pub alternative: Option<BlockStatement>,
+}
+
+impl Display for IfExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "if {} {} {}", self.condition, self.consequence, match &self.alternative {
+            Some(alt) => format!("else {}", alt),
+            None => String::new(),
+        })
+    }
+}
+
+impl IfExpression {
+    pub fn new(token: Token, condition: Box<Expression>, consequence: BlockStatement, alternative: Option<BlockStatement>) -> Self {
+        Self { token, condition, consequence, alternative }
+    }
+}
+
+#[derive(Clone)]
+pub struct FunctionLiteral {
+    pub token: Token,
+    pub parameters: Vec<Identifier>,
+    pub body: BlockStatement,
+}
+
+impl Display for FunctionLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let params: Vec<String> = self.parameters.iter().map(|p| format!("{}", p)).collect();
+
+        write!(f, "{}({}) {}", self.token.literal, params.join(", "), self.body)
+    }
+}
+
+impl FunctionLiteral {
+    pub fn new(token: Token, parameters: Vec<Identifier>, body: BlockStatement) -> Self {
+        Self { token, parameters, body }
+    }
+}
+
+#[derive(Clone)]
+pub struct CallExpression {
+    pub token: Token,
+    pub function: Box<Expression>,
+    pub arguments: Vec<Box<Expression>>,
+}
+
+impl Display for CallExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let args: Vec<String> = self.arguments.iter().map(|p| format!("{}", p)).collect();
+
+        write!(f, "{}({})", self.function, args.join(", "))
+    }
+}
+
+impl CallExpression {
+    pub fn new(token: Token, function: Box<Expression>, arguments: Vec<Box<Expression>>) -> Self {
+        Self { token, function, arguments }
     }
 }
 
