@@ -10,9 +10,9 @@ pub enum Node {
 impl Display for Node {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", match self {
-            Node::Statement(ls) => format!("{}", ls),
-            Node::Expression(ex) => format!("{}", ex),
-            Node::Program(p) => format!("{}", p),
+            Self::Statement(ls) => format!("{}", ls),
+            Self::Expression(ex) => format!("{}", ex),
+            Self::Program(p) => format!("{}", p),
         })
     }
 }
@@ -20,9 +20,9 @@ impl Display for Node {
 impl Node {
     pub fn token_literal(&self) -> &str {
         match self {
-            Node::Statement(s) => s.token_literal(),
-            Node::Expression(e) => e.token_literal(),
-            Node::Program(p) => p.token_literal(),
+            Self::Statement(s) => s.token_literal(),
+            Self::Expression(e) => e.token_literal(),
+            Self::Program(p) => p.token_literal(),
         }
     }
 }
@@ -38,10 +38,10 @@ pub enum Statement {
 impl Display for Statement {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", match self {
-            Statement::LetStatement(ls) => format!("{}", ls),
-            Statement::ReturnStatement(rs) => format!("{}", rs),
-            Statement::ExpressionStatement(es) => format!("{}", es),
-            Statement::BlockStatement(bs) => format!("{}", bs),
+            Self::LetStatement(ls) => format!("{}", ls),
+            Self::ReturnStatement(rs) => format!("{}", rs),
+            Self::ExpressionStatement(es) => format!("{}", es),
+            Self::BlockStatement(bs) => format!("{}", bs),
         })
     }
 }
@@ -49,10 +49,10 @@ impl Display for Statement {
 impl Statement {
     pub fn token_literal(&self) -> &str {
         match self {
-            Statement::LetStatement(ls) => ls.token.literal.as_str(),
-            Statement::ReturnStatement(rs) => rs.token.literal.as_str(),
-            Statement::ExpressionStatement(es) => es.token.literal.as_str(),
-            Statement::BlockStatement(bs) => bs.token.literal.as_str(),
+            Self::LetStatement(ls) => ls.token.literal.as_str(),
+            Self::ReturnStatement(rs) => rs.token.literal.as_str(),
+            Self::ExpressionStatement(es) => es.token.literal.as_str(),
+            Self::BlockStatement(bs) => bs.token.literal.as_str(),
         }
     }
 }
@@ -155,7 +155,7 @@ pub enum Expression {
     IntegerLiteral(IntegerLiteral),
     PrefixExpression(PrefixExpression),
     InfixExpression(InfixExpression),
-    Boolean(Boolean),
+    BooleanLiteral(BooleanLiteral),
     IfExpression(IfExpression),
     FunctionLiteral(FunctionLiteral),
     CallExpression(CallExpression),
@@ -164,14 +164,14 @@ pub enum Expression {
 impl Display for Expression {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", match self {
-            Expression::Identifier(id) => format!("{}", id),
-            Expression::IntegerLiteral(il) => format!("{}", il),
-            Expression::PrefixExpression(pe) => format!("{}", pe),
-            Expression::InfixExpression(ie) => format!("{}", ie),
-            Expression::Boolean(bl) => format!("{}", bl),
-            Expression::IfExpression(ie) => format!("{}", ie),
-            Expression::FunctionLiteral(fl) => format!("{}", fl),
-            Expression::CallExpression(ce) => format!("{}", ce),
+            Self::Identifier(id) => format!("{}", id),
+            Self::IntegerLiteral(il) => format!("{}", il),
+            Self::PrefixExpression(pe) => format!("{}", pe),
+            Self::InfixExpression(ie) => format!("{}", ie),
+            Self::BooleanLiteral(bl) => format!("{}", bl),
+            Self::IfExpression(ie) => format!("{}", ie),
+            Self::FunctionLiteral(fl) => format!("{}", fl),
+            Self::CallExpression(ce) => format!("{}", ce),
         })
     }
 }
@@ -179,14 +179,14 @@ impl Display for Expression {
 impl Expression {
     pub fn token_literal(&self) -> &str {
         match self {
-            Expression::Identifier(id) => id.token.literal.as_str(),
-            Expression::IntegerLiteral(il) => il.token.literal.as_str(),
-            Expression::PrefixExpression(pe) => pe.token.literal.as_str(),
-            Expression::InfixExpression(ie) => ie.token.literal.as_str(),
-            Expression::Boolean(bl) => bl.token.literal.as_str(),
-            Expression::IfExpression(ie) => ie.token.literal.as_str(),
-            Expression::FunctionLiteral(fl) => fl.token.literal.as_str(),
-            Expression::CallExpression(ce) => ce.token.literal.as_str(),
+            Self::Identifier(id) => id.token.literal.as_str(),
+            Self::IntegerLiteral(il) => il.token.literal.as_str(),
+            Self::PrefixExpression(pe) => pe.token.literal.as_str(),
+            Self::InfixExpression(ie) => ie.token.literal.as_str(),
+            Self::BooleanLiteral(bl) => bl.token.literal.as_str(),
+            Self::IfExpression(ie) => ie.token.literal.as_str(),
+            Self::FunctionLiteral(fl) => fl.token.literal.as_str(),
+            Self::CallExpression(ce) => ce.token.literal.as_str(),
         }
     }
 }
@@ -267,20 +267,20 @@ impl InfixExpression {
 }
 
 #[derive(Clone)]
-pub struct Boolean {
+pub struct BooleanLiteral {
     pub token: Token,
     pub value: bool,
 }
 
-impl Display for Boolean {
+impl Display for BooleanLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         write!(f, "{}", self.token.literal)
     }
 }
 
-impl Boolean {
+impl BooleanLiteral {
     pub fn new(token: Token, value: bool) -> Self {
-        Boolean { token, value }
+        BooleanLiteral { token, value }
     }
 }
 

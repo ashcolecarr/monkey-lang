@@ -219,7 +219,7 @@ impl Parser {
     }
 
     fn parse_boolean(&mut self) -> Option<Expression> {
-        Some(Expression::Boolean(Boolean::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
+        Some(Expression::BooleanLiteral(BooleanLiteral::new(self.current_token.clone(), self.current_token_is(&TokenType::True))))
     }
 
     fn parse_grouped_expression(&mut self) -> Option<Expression> {
@@ -808,7 +808,7 @@ mod test {
                             match &es.expression {
                                 Some(ex) => {
                                     match ex {
-                                        Expression::Boolean(bl) => assert_eq!(bl.value, boolean_test.expected_boolean),
+                                        Expression::BooleanLiteral(bl) => assert_eq!(bl.value, boolean_test.expected_boolean),
                                         _ => assert!(false, "Expression was not a Boolean."),
                                     };
                                 },
@@ -1115,7 +1115,7 @@ mod test {
 
     fn test_boolean_literal(boolean_literal: &Expression, value: bool) {
         match boolean_literal {
-            Expression::Boolean(bl) => {
+            Expression::BooleanLiteral(bl) => {
                 assert_eq!(bl.value, value);
                 assert_eq!(bl.token.literal, value.to_string())
             },

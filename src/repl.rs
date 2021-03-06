@@ -1,11 +1,18 @@
+use super::ast::Node;
+use super::environment::Environment;
+use super::evaluator::eval;
 use super::lexer::Lexer;
 use super::MONKEY_FACE;
+use super::object::Object;
 use super::parser::Parser;
 use super::PROMPT;
+use std::cell::RefCell;
 use std::io::{stdin, stdout, Write};
+use std::rc::Rc;
 
 pub fn start() {
     let mut line = String::new();
+    let env = Rc::new(RefCell::new(Environment::new()));
 
     loop {
         print!("{}", PROMPT);
@@ -29,7 +36,11 @@ pub fn start() {
                 }
 
                 if let Some(p) = program {
-                    println!("{}", p);
+                    let evaluated = eval(&Node::Program(p), Rc::clone(&env));
+                    if let Object::NonPrint = evaluated {
+                        continue;
+                    }
+                    println!("{}", evaluated);
                 }
             },
             Err(e) => eprintln!("Error: {}", e),
