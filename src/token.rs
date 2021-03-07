@@ -8,6 +8,7 @@ pub enum TokenType {
     // Identifiers and literals
     Ident,
     Int,
+    String,
 
     // Operators
     Assign,
@@ -28,6 +29,8 @@ pub enum TokenType {
     RParen,
     LBrace,
     RBrace,
+    LBracket,
+    RBracket,
 
     // Keywords
     Function,
@@ -46,6 +49,7 @@ impl Display for TokenType {
             TokenType::Eof => "eof",
             TokenType::Ident => "ident",
             TokenType::Int => "int",
+            TokenType::String => "string",
             TokenType::Assign => "=",
             TokenType::Plus => "+",
             TokenType::Minus => "-",
@@ -62,6 +66,8 @@ impl Display for TokenType {
             TokenType::RParen => ")",
             TokenType::LBrace => "{",
             TokenType::RBrace => "}",
+            TokenType::LBracket => "[",
+            TokenType::RBracket => "]",
             TokenType::Function => "function",
             TokenType::Let => "let",
             TokenType::True => "true",

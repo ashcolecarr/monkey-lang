@@ -89,6 +89,28 @@ pub fn eval(node: &Node, environment: Rc<RefCell<Environment>>) -> Object {
 
                     apply_function(&function, &arguments)
                 },
+                Expression::StringLiteral(sl) => Object::StringObject(StringObject::new(sl.value.as_str())),
+                Expression::ArrayLiteral(al) => {
+                    let elements = eval_expressions(&al.elements, environment);
+                    if elements.len() == 1 && is_error(&elements[0]) {
+                        return elements[0].clone();
+                    }
+
+                    Object::Array(Array::new(elements))
+                },
+                Expression::IndexExpression(ie) => {
+                    let left = eval(&Node::Expression(*ie.left.clone()), Rc::clone(&environment));
+                    if is_error(&left) {
+                        return left;
+                    }
+
+                    let index = eval(&Node::Expression(*ie.index.clone()), environment);
+                    if is_error(&index) {
+                        return index;
+                    }
+
+                    eval_index_expression(&left, &index)
+                },
             }
         },
     }
@@ -160,6 +182,7 @@ fn eval_infix_expression(operator: &str, left: &Object, right: &Object) -> Objec
     match (left, right) {
         (Object::Integer(l), Object::Integer(r)) => eval_integer_infix_expression(operator, l, r),
         (Object::Boolean(l), Object::Boolean(r)) => eval_boolean_infix_expression(operator, l, r),
+        (Object::StringObject(l), Object::StringObject(r)) => eval_string_infix_expression(operator, l, r),
         _ => new_error(format!("type mismatch: {} {} {}", left.type_of(), operator, right.type_of()).as_str()),
     }
 }
@@ -190,6 +213,19 @@ fn eval_boolean_infix_expression(operator: &str, left: &Boolean, right: &Boolean
     }
 }
 
+fn eval_string_infix_expression(operator: &str, left: &StringObject, right: &StringObject) -> Object {
+    match operator {
+        "+" => {
+            let left_val = left.value.clone();
+            let right_val = right.value.clone();
+            let concatenated = left_val + right_val.as_str();
+
+            Object::StringObject(StringObject::new(concatenated.as_str()))
+        },
+        _ => new_error(format!("unknown operator: {} {} {}", left.type_of(), operator, right.type_of()).as_str()),
+    }
+}
+
 fn eval_if_expression(if_expression: &IfExpression, environment: Rc<RefCell<Environment>>) -> Object {
     let condition = eval(&Node::Expression(*if_expression.condition.clone()), Rc::clone(&environment));
     if is_error(&condition) {
@@ -213,14 +249,19 @@ fn eval_identifier(identifier: &Identifier, environment: Rc<RefCell<Environment>
         return val;
     }
 
+    let builtin = environment.borrow().get_builtin(&identifier.value);
+    if let Some(bi) = builtin {
+        return bi;
+    }
+
     new_error(format!("identifier not found: {}", identifier.value).as_str())
 }
 
-fn eval_expressions(expressions: &Vec<Box<Expression>>, environment: Rc<RefCell<Environment>>) -> Vec<Object> {
+fn eval_expressions(expressions: &Vec<Expression>, environment: Rc<RefCell<Environment>>) -> Vec<Object> {
     let mut result = vec![];
 
     for expression in expressions {
-        let evaluated = eval(&Node::Expression(*expression.clone()), Rc::clone(&environment));
+        let evaluated = eval(&Node::Expression(expression.clone()), Rc::clone(&environment));
         if is_error(&evaluated) {
             return vec![evaluated];
         }
@@ -239,6 +280,10 @@ fn apply_function(function: &Object, arguments: &Vec<Object>) -> Object {
 
             unwrap_return_value(evaluated)
         },
+        Object::Builtin(bi) => {
+            let builtin = bi.builtin_function;
+            builtin(arguments)
+        }
         _ => new_error(format!("not a function: {}", function.type_of()).as_str()),
     }
 }
@@ -257,6 +302,23 @@ fn unwrap_return_value(object: Object) -> Object {
     match object {
         Object::ReturnValue(rv) => *rv.value.clone(), 
         _ => object,
+    }
+}
+
+fn eval_index_expression(left: &Object, index: &Object) -> Object {
+    match (left, index) {
+        (Object::Array(arr), Object::Integer(idx)) => eval_array_index_expression(arr, idx),
+        _ => new_error(format!("index operator not supported: {}", left.type_of()).as_str()),
+    }
+}
+
+fn eval_array_index_expression(array: &Array, index: &Integer) -> Object {
+    let max = (array.elements.len() - 1) as i64;
+
+    if index.value < 0 || index.value > max {
+        Object::Null(Null::new())
+    } else {
+        array.elements[index.value as usize].clone()
     }
 }
 
@@ -456,6 +518,7 @@ if (10 > 1) {
             ErrorTest { input: "if (10 > 1) { true + false; }", expected: "unknown operator: BOOLEAN + BOOLEAN" },
             ErrorTest { input: multiline_input, expected: "unknown operator: BOOLEAN + BOOLEAN" },
             ErrorTest { input: "foobar", expected: "identifier not found: foobar" },
+            ErrorTest { input: "\"Hello\" - \"World\"", expected: "unknown operator: STRING - STRING" },
         ];
 
         for error_test in error_tests {
@@ -552,11 +615,146 @@ addTwo(2);"#;
         }
     }
 
+    #[test]
+    fn test_string_literal() {
+        let input = "\"Hello World!\"";
+
+        match test_eval(input) {
+            Some(e) => {
+                match e {
+                    Object::StringObject(so) => assert_eq!(so.value, "Hello World!"),
+                    _ => assert!(false, "Object was not a StringObject"),
+                }
+            },
+            None => assert!(false, "Program could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn test_string_concatenation() {
+        let input = "\"Hello\" + \" \" + \"World!\"";
+
+        match test_eval(input) {
+            Some(e) => {
+                match e {
+                    Object::StringObject(so) => assert_eq!(so.value, "Hello World!"),
+                    _ => assert!(false, "Object was not a StringObject"),
+                }
+            },
+            None => assert!(false, "Program could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn test_builtin_functions() {
+        struct BuiltinTest<'a> {
+            input: &'a str,
+            expected: Object,
+        };
+
+        let builtin_tests = vec![
+            BuiltinTest { input: "len(\"\")", expected: Object::Integer(Integer::new(0)) },
+            BuiltinTest { input: "len(\"four\")", expected: Object::Integer(Integer::new(4)) },
+            BuiltinTest { input: "len(\"hello world\")", expected: Object::Integer(Integer::new(11)) },
+            BuiltinTest { input: "len(1)", expected: Object::StringObject(StringObject::new("argument to \"len\" not supported, got INTEGER")) },
+            BuiltinTest { input: "len(\"one\", \"two\")", expected: Object::StringObject(StringObject::new("wrong number of arguments. got 2, want 1")) },
+            BuiltinTest { input: "len([1, 2, 3])", expected: Object::Integer(Integer::new(3)) },
+            BuiltinTest { input: "len([])", expected: Object::Integer(Integer::new(0)) },
+            BuiltinTest { input: "first([1, 2, 3])", expected: Object::Integer(Integer::new(1)) },
+            BuiltinTest { input: "first([])", expected: Object::Null(Null::new()) },
+            BuiltinTest { input: "first(1)", expected: Object::StringObject(StringObject::new("argument to \"first\" must be ARRAY, got INTEGER")) },
+            BuiltinTest { input: "last([1, 2, 3])", expected: Object::Integer(Integer::new(3)) },
+            BuiltinTest { input: "last([])", expected: Object::Null(Null::new()) },
+            BuiltinTest { input: "last(1)", expected: Object::StringObject(StringObject::new("argument to \"last\" must be ARRAY, got INTEGER")) },
+            BuiltinTest { input: "rest([1, 2, 3])", expected: Object::Array(Array::new(vec![Object::Integer(Integer::new(2)), Object::Integer(Integer::new(3))])) },
+            BuiltinTest { input: "rest([])", expected: Object::Null(Null::new()) },
+            BuiltinTest { input: "push([], 1)", expected: Object::Array(Array::new(vec![Object::Integer(Integer::new(1))])) },
+            BuiltinTest { input: "push(1, 1)", expected: Object::StringObject(StringObject::new("argument to \"push\" must be ARRAY, got INTEGER")) },
+        ];
+
+        for builtin_test in builtin_tests {
+            match test_eval(builtin_test.input) {
+                Some(e) => {
+                    match (&e, &builtin_test.expected) {
+                        (Object::Integer(_), Object::Integer(exp)) => test_integer_object(&e, exp.value),
+                        (Object::Null(_), Object::Null(_)) => test_null_object(&e),
+                        (Object::Error(act), Object::StringObject(exp)) => assert_eq!(act.message, exp.value),
+                        (Object::Array(act), Object::Array(exp)) => {
+                            assert_eq!(act.elements.len(), exp.elements.len());
+                            for (i, elem) in exp.elements.iter().enumerate() {
+                                match elem {
+                                    Object::Integer(int) => test_integer_object(&act.elements[i], int.value),
+                                    _ => assert!(false, "Array object was not an Integer."),
+                                };
+                            }
+                        },
+                        _ => assert!(false, "Object type was not recognized."),
+                    }
+                },
+                None => assert!(false, "Program could not be evaluated."),
+            }
+        }
+    }
+
+    #[test]
+    fn test_array_literals() {
+        let input = "[1, 2 * 2, 3 + 3]";
+
+        match test_eval(input) {
+            Some(e) => {
+                match e {
+                    Object::Array(a) => {
+                        assert_eq!(a.elements.len(), 3);
+                        test_integer_object(&a.elements[0], 1);
+                        test_integer_object(&a.elements[1], 4);
+                        test_integer_object(&a.elements[2], 6);
+                    },
+                    _ => assert!(false, "Object was not an Array"),
+                }
+            },
+            None => assert!(false, "Program could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn test_array_index_expressions() {
+        struct IndexTest<'a> {
+            input: &'a str,
+            expected: Object,
+        };
+
+        let index_tests = vec![
+            IndexTest { input: "[1, 2, 3][0]", expected: Object::Integer(Integer::new(1)) },
+            IndexTest { input: "[1, 2, 3][1]", expected: Object::Integer(Integer::new(2)) },
+            IndexTest { input: "[1, 2, 3][2]", expected: Object::Integer(Integer::new(3)) },
+            IndexTest { input: "let i = 0; [1][i];", expected: Object::Integer(Integer::new(1)) },
+            IndexTest { input: "[1, 2, 3][1 + 1]", expected: Object::Integer(Integer::new(3)) },
+            IndexTest { input: "let myArray = [1, 2, 3]; myArray[2];", expected: Object::Integer(Integer::new(3)) },
+            IndexTest { input: "let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2];", expected: Object::Integer(Integer::new(6)) },
+            IndexTest { input: "let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i]", expected: Object::Integer(Integer::new(2)) },
+            IndexTest { input: "[1, 2, 3][3]", expected: Object::Null(Null::new()) },
+            IndexTest { input: "[1, 2, 3][-1]", expected: Object::Null(Null::new()) },
+        ];
+
+        for index_test in index_tests {
+            match test_eval(index_test.input) {
+                Some(e) => {
+                    match (&e, &index_test.expected) {
+                        (Object::Integer(_), Object::Integer(exp)) => test_integer_object(&e, exp.value),
+                        (Object::Null(_), Object::Null(_)) => test_null_object(&e),
+                        _ => assert!(false, "Object type was not recognized."),
+                    }
+                },
+                None => assert!(false, "Program could not be evaluated."),
+            }
+        }
+    }
+
     fn test_eval(input: &str) -> Option<Object> {
         let lexer = Lexer::new(input);
         let mut parser = Parser::new(lexer);
         let program = parser.parse_program();
-        let environment = Rc::new(RefCell::new(Environment::new()));
+        let environment = Rc::new(RefCell::new(Environment::new(true)));
 
         match program {
             Some(p) => Some(eval(&Node::Program(p), environment)),

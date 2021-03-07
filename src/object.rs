@@ -10,6 +10,11 @@ const NULL_OBJ: &str = "NULL";
 const RETURN_VALUE_OBJ: &str = "RETURN_VALUE";
 const ERROR_OBJ: &str = "ERROR";
 const FUNCTION_OBJ: &str = "FUNCTION"; 
+const STRING_OBJ: &str = "STRING"; 
+const BUILTIN_OBJ: &str = "BUILTIN"; 
+const ARRAY_OBJ: &str = "ARRAY"; 
+
+pub type BuiltinFunction = fn(arguments: &Vec<Object>) -> Object;
 
 #[derive(Clone)]
 pub enum Object {
@@ -20,6 +25,9 @@ pub enum Object {
     ReturnValue(ReturnValue),
     Error(Error),
     Function(Function),
+    StringObject(StringObject),
+    Builtin(Builtin),
+    Array(Array),
 }
 
 impl Display for Object {
@@ -32,6 +40,9 @@ impl Display for Object {
             Self::ReturnValue(rv) => format!("{}", rv),
             Self::Error(e) => format!("{}", e),
             Self::Function(f) => format!("{}", f),
+            Self::StringObject(so) => format!("{}", so),
+            Self::Builtin(b) => format!("{}", b),
+            Self::Array(a) => format!("{}", a),
         })
     }
 }
@@ -47,6 +58,9 @@ impl Object {
             Self::ReturnValue(rv) => rv.type_of(),
             Self::Error(e) => e.type_of(),
             Self::Function(f) => f.type_of(),
+            Self::StringObject(so) => so.type_of(),
+            Self::Builtin(b) => b.type_of(),
+            Self::Array(a) => a.type_of(),
         }
     }
 }
@@ -176,5 +190,70 @@ impl Function {
 
     pub fn type_of(&self) -> &str {
         FUNCTION_OBJ
+    }
+}
+
+#[derive(Clone)]
+pub struct StringObject {
+    pub value: String,
+}
+
+impl Display for StringObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{}", self.value)
+    }
+}
+
+impl StringObject {
+    pub fn new(value: &str) -> Self {
+        Self { value: String::from(value) }
+    }
+
+    pub fn type_of(&self) -> &str {
+        STRING_OBJ
+    }
+}
+
+#[derive(Clone)]
+pub struct Builtin {
+    pub builtin_function: BuiltinFunction,
+}
+
+impl Display for Builtin {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "builtin function")
+    }
+}
+
+impl Builtin {
+    pub fn new(builtin_function: BuiltinFunction) -> Self {
+        Self { builtin_function }
+    }
+
+    pub fn type_of(&self) -> &str {
+        BUILTIN_OBJ
+    }
+}
+
+#[derive(Clone)]
+pub struct Array {
+    pub elements: Vec<Object>,
+}
+
+impl Display for Array {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let elems: Vec<String> = self.elements.iter().map(|e| format!("{}", e)).collect();
+
+        write!(f, "[{}]", elems.join(", "))
+    }
+}
+
+impl Array {
+    pub fn new(elements: Vec<Object>) -> Self {
+        Self { elements }
+    }
+
+    pub fn type_of(&self) -> &str {
+        ARRAY_OBJ
     }
 }

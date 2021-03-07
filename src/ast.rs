@@ -159,6 +159,9 @@ pub enum Expression {
     IfExpression(IfExpression),
     FunctionLiteral(FunctionLiteral),
     CallExpression(CallExpression),
+    StringLiteral(StringLiteral),
+    ArrayLiteral(ArrayLiteral),
+    IndexExpression(IndexExpression),
 }
 
 impl Display for Expression {
@@ -172,6 +175,9 @@ impl Display for Expression {
             Self::IfExpression(ie) => format!("{}", ie),
             Self::FunctionLiteral(fl) => format!("{}", fl),
             Self::CallExpression(ce) => format!("{}", ce),
+            Self::StringLiteral(sl) => format!("{}", sl),
+            Self::ArrayLiteral(al) => format!("{}", al),
+            Self::IndexExpression(ie) => format!("{}", ie),
         })
     }
 }
@@ -187,6 +193,9 @@ impl Expression {
             Self::IfExpression(ie) => ie.token.literal.as_str(),
             Self::FunctionLiteral(fl) => fl.token.literal.as_str(),
             Self::CallExpression(ce) => ce.token.literal.as_str(),
+            Self::StringLiteral(sl) => sl.token.literal.as_str(),
+            Self::ArrayLiteral(al) => al.token.literal.as_str(),
+            Self::IndexExpression(ie) => ie.token.literal.as_str(),
         }
     }
 }
@@ -332,7 +341,7 @@ impl FunctionLiteral {
 pub struct CallExpression {
     pub token: Token,
     pub function: Box<Expression>,
-    pub arguments: Vec<Box<Expression>>,
+    pub arguments: Vec<Expression>,
 }
 
 impl Display for CallExpression {
@@ -344,8 +353,65 @@ impl Display for CallExpression {
 }
 
 impl CallExpression {
-    pub fn new(token: Token, function: Box<Expression>, arguments: Vec<Box<Expression>>) -> Self {
+    pub fn new(token: Token, function: Box<Expression>, arguments: Vec<Expression>) -> Self {
         Self { token, function, arguments }
+    }
+}
+
+#[derive(Clone)]
+pub struct StringLiteral {
+    pub token: Token,
+    pub value: String,
+}
+
+impl Display for StringLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "{}", self.token.literal)
+    }
+}
+
+impl StringLiteral {
+    pub fn new(token: Token, value: String) -> Self {
+        Self { token, value }
+    }
+}
+
+#[derive(Clone)]
+pub struct ArrayLiteral {
+    pub token: Token,
+    pub elements: Vec<Expression>,
+}
+
+impl Display for ArrayLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let elems: Vec<String> = self.elements.iter().map(|p| format!("{}", p)).collect();
+
+        write!(f, "[{}]", elems.join(", "))
+    }
+}
+
+impl ArrayLiteral {
+    pub fn new(token: Token, elements: Vec<Expression>) -> Self {
+        Self { token, elements }
+    }
+}
+
+#[derive(Clone)]
+pub struct IndexExpression {
+    pub token: Token,
+    pub left: Box<Expression>,
+    pub index: Box<Expression>,
+}
+
+impl Display for IndexExpression {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "({}[{}])", self.left, self.index)
+    }
+}
+
+impl IndexExpression {
+    pub fn new(token: Token, left: Box<Expression>, index: Box<Expression>) -> Self {
+        Self { token, left, index }
     }
 }
 

@@ -65,6 +65,17 @@ impl Lexer {
             ',' => TokenType::Comma,
             '{' => TokenType::LBrace,
             '}' => TokenType::RBrace,
+            '"' => {
+                match self.read_string() {
+                    Some(s) => {
+                        literal = s;
+                        TokenType::String
+                    },
+                    None => TokenType::Illegal
+                }
+            },
+            '[' => TokenType::LBracket,
+            ']' => TokenType::RBracket,
             '\0' => TokenType::Eof,
             _ => {
                 if self.is_letter() {
@@ -81,8 +92,10 @@ impl Lexer {
             },
         };
 
-        // Exit early here since the identifier's characters are already consumed.
-        if !literal.is_empty() {
+        /* Exit early here since the identifier's characters are already consumed.
+           Also, handle an empty string value. 
+           */ 
+        if !literal.is_empty() || token_type == TokenType::String {
             return Token::new(token_type, literal);
         }
 
@@ -121,6 +134,44 @@ impl Lexer {
         }
 
         self.input[position..self.position].iter().collect()
+    }
+
+    fn read_string(&mut self) -> Option<String> {
+        let mut output = String::new();
+        loop {
+            self.read_char();
+            match self.ch {
+                '"' => {
+                    self.read_char();
+                    break
+                },
+                '\\' => {
+                    // Capture an escaped character.
+                    match self.peek_char() {
+                        '"' => {
+                            output.push('"');
+                            self.read_char();
+                        },
+                        't' => {
+                            output.push('\t');
+                            self.read_char();
+                        },
+                        'n' => {
+                            output.push('\n');
+                            self.read_char();
+                        },
+                        _ => (),
+                    };
+                    continue;
+                }
+                '\0' => return None,
+                _ => (),
+            };
+
+            output.push(self.ch);
+        }
+
+        Some(output)
     }
 
     fn is_letter(&self) -> bool {
@@ -179,7 +230,14 @@ if (5 < 10) {
 }
 
 10 == 10;
-10 != 9;"#;
+10 != 9;
+""
+"foobar"
+"foo bar"
+"hello \"world\""
+"hello\n world"
+"hello\t\t\tworld"
+[1, 2];"#;
 
         struct TokenTest<'a> {
             expected_type: TokenType,
@@ -259,6 +317,18 @@ if (5 < 10) {
             TokenTest { expected_type: TokenType::Int, expected_literal: "10" },
             TokenTest { expected_type: TokenType::NotEq, expected_literal: "!=" },
             TokenTest { expected_type: TokenType::Int, expected_literal: "9" },
+            TokenTest { expected_type: TokenType::Semicolon, expected_literal: ";" },
+            TokenTest { expected_type: TokenType::String, expected_literal: "" },
+            TokenTest { expected_type: TokenType::String, expected_literal: "foobar" },
+            TokenTest { expected_type: TokenType::String, expected_literal: "foo bar" },
+            TokenTest { expected_type: TokenType::String, expected_literal: "hello \"world\"" },
+            TokenTest { expected_type: TokenType::String, expected_literal: "hello\n world" },
+            TokenTest { expected_type: TokenType::String, expected_literal: "hello\t\t\tworld" },
+            TokenTest { expected_type: TokenType::LBracket, expected_literal: "[" },
+            TokenTest { expected_type: TokenType::Int, expected_literal: "1" },
+            TokenTest { expected_type: TokenType::Comma, expected_literal: "," },
+            TokenTest { expected_type: TokenType::Int, expected_literal: "2" },
+            TokenTest { expected_type: TokenType::RBracket, expected_literal: "]" },
             TokenTest { expected_type: TokenType::Semicolon, expected_literal: ";" },
             TokenTest { expected_type: TokenType::Eof, expected_literal: "\0" },
         ];

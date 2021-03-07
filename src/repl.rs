@@ -12,7 +12,7 @@ use std::rc::Rc;
 
 pub fn start() {
     let mut line = String::new();
-    let env = Rc::new(RefCell::new(Environment::new()));
+    let env = Rc::new(RefCell::new(Environment::new(true)));
 
     loop {
         print!("{}", PROMPT);

@@ -48,6 +48,8 @@ impl Parser {
         parser.prefix_parse_fns.insert(TokenType::LParen, Self::parse_grouped_expression);
         parser.prefix_parse_fns.insert(TokenType::If, Self::parse_if_expression);
         parser.prefix_parse_fns.insert(TokenType::Function, Self::parse_function_literal);
+        parser.prefix_parse_fns.insert(TokenType::String, Self::parse_string_literal);
+        parser.prefix_parse_fns.insert(TokenType::LBracket, Self::parse_array_literal);
 
         parser.infix_parse_fns.insert(TokenType::Plus, Self::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Minus, Self::parse_infix_expression);
@@ -58,6 +60,7 @@ impl Parser {
         parser.infix_parse_fns.insert(TokenType::Lt, Self::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Gt, Self::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::LParen, Self::parse_call_expression);
+        parser.infix_parse_fns.insert(TokenType::LBracket, Self::parse_index_expression);
 
         // Prime the tokens.
         parser.next_token();
@@ -111,7 +114,7 @@ impl Parser {
         self.next_token();
         let value = self.parse_expression(&Precedence::Lowest);
 
-        if !self.current_token_is(&TokenType::Semicolon) {
+        if self.peek_token_is(&TokenType::Semicolon) {
             self.next_token();
         }
 
@@ -311,6 +314,48 @@ impl Parser {
         Some(identifiers)
     }
 
+    fn parse_string_literal(&mut self) -> Option<Expression> {
+        Some(Expression::StringLiteral(StringLiteral::new(self.current_token.clone(), self.current_token.literal.clone())))
+    }
+
+    fn parse_array_literal(&mut self) -> Option<Expression> {
+        let current_token = self.current_token.clone();
+
+        let elements = self.parse_expression_list(&TokenType::RBracket);
+        match elements {
+            Some(elems) => Some(Expression::ArrayLiteral(ArrayLiteral::new(current_token, elems))),
+            None => None,
+        }
+    }
+
+    fn parse_expression_list(&mut self, end: &TokenType) -> Option<Vec<Expression>> {
+        let mut list = vec![];
+
+        if self.peek_token_is(end) {
+            self.next_token();
+            return Some(list);
+        }
+
+        self.next_token();
+        if let Some(pe) = self.parse_expression(&Precedence::Lowest) {
+            list.push(pe);
+        }
+
+        while self.peek_token_is(&TokenType::Comma) {
+            self.next_token();
+            self.next_token();
+            if let Some(pe) = self.parse_expression(&Precedence::Lowest) {
+                list.push(pe);
+            }
+        }
+
+        if !self.expect_peek(end) {
+            return None;
+        }
+
+        Some(list)
+    }
+
     fn parse_infix_expression(&mut self, left: Expression) -> Option<Expression> {
         let current_token = self.current_token.clone();
         let operator = self.current_token.literal.clone();
@@ -327,7 +372,7 @@ impl Parser {
 
     fn parse_call_expression(&mut self, function: Expression) -> Option<Expression> {
         let current_token = self.current_token.clone();
-        let arguments = self.parse_call_arguments();
+        let arguments = self.parse_expression_list(&TokenType::RParen);
 
         match arguments {
             Some(args) => Some(Expression::CallExpression(CallExpression::new(current_token, Box::new(function.clone()), args))),
@@ -335,31 +380,20 @@ impl Parser {
         }
     }
 
-    fn parse_call_arguments(&mut self) -> Option<Vec<Box<Expression>>> {
-        let mut arguments = vec![];
-        if self.peek_token_is(&TokenType::RParen) {
-            self.next_token();
-            return Some(arguments);
-        }
+    fn parse_index_expression(&mut self, left: Expression) -> Option<Expression> {
+        let current_token = self.current_token.clone();
 
         self.next_token();
-        if let Some(exp) = self.parse_expression(&Precedence::Lowest) {
-            arguments.push(Box::new(exp));
-        }
+        let index = self.parse_expression(&Precedence::Lowest);
 
-        while self.peek_token_is(&TokenType::Comma) {
-            self.next_token();
-            self.next_token();
-            if let Some(exp) = self.parse_expression(&Precedence::Lowest) {
-                arguments.push(Box::new(exp));
-            }
-        }
-
-        if !self.expect_peek(&TokenType::RParen) {
+        if !self.expect_peek(&TokenType::RBracket) {
             return None;
         }
 
-        Some(arguments)
+        match index {
+            Some(i) => Some(Expression::IndexExpression(IndexExpression::new(current_token, Box::new(left), Box::new(i)))),
+            None => None
+        }
     }
 
     fn next_token(&mut self) {
@@ -400,7 +434,7 @@ impl Parser {
             TokenType::Plus | TokenType::Minus => Precedence::Sum,
             TokenType::Slash | TokenType::Asterisk => Precedence::Product,
             TokenType::LParen => Precedence::Call,
-            //TokenType::LBracket => Precedence::Index,
+            TokenType::LBracket => Precedence::Index,
             _ => Precedence::Lowest,
         }
     }
@@ -762,6 +796,8 @@ mod test {
             OperatorTest { input: "a + add(b * c) + d", expected: "((a + add((b * c))) + d)" },
             OperatorTest { input: "add(a, b, 1, 2 * 3, 4 + 5, add(6, 7 * 8))", expected: "add(a, b, 1, (2 * 3), (4 + 5), add(6, (7 * 8)))" },
             OperatorTest { input: "add(a + b + c * d / f + g)", expected: "add((((a + b) + ((c * d) / f)) + g))" },
+            OperatorTest { input: "a * [1, 2, 3, 4][b * c] * d", expected: "((a * ([1, 2, 3, 4][(b * c)])) * d)" },
+            OperatorTest { input: "add(a * b[2], b[1], 2 * [1, 2][1])", expected: "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))" },
         ];
 
         for operator_test in operator_tests {
@@ -1051,6 +1087,116 @@ mod test {
                                         test_infix_expression(&ce.arguments[2], 4, "+", 5);
                                     },
                                     _ => assert!(false, "Expression was not a CallExpression."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_string_literal_expression() {
+        let input = "\"hello world\";";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::StringLiteral(sl) => {
+                                        assert_eq!(sl.value, "hello world");
+                                        assert_eq!(sl.token.literal, "hello world");
+                                    },
+                                    _ => assert!(false, "Expression was not a StringLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_array_literals() {
+        let input = "[1, 2 * 2, 3 + 3]";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::ArrayLiteral(al) => {
+                                        assert_eq!(al.elements.len(), 3);
+                                        test_integer_literal(&al.elements[0], 1);
+                                        test_infix_expression(&al.elements[1], 2, "*", 2);
+                                        test_infix_expression(&al.elements[2], 3, "+", 3);
+                                    },
+                                    _ => assert!(false, "Expression was not an ArrayLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_index_expressions() {
+        let input = "myArray[1 + 1]";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::IndexExpression(ie) => {
+                                        test_identifier(&ie.left, "myArray");
+                                        test_infix_expression(&ie.index, 1, "+", 1);
+                                    },
+                                    _ => assert!(false, "Expression was not an IndexExpression."),
                                 };
                             },
                             None => assert!(false, "Expression could not be parsed."),
