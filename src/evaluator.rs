@@ -2,6 +2,7 @@ use super::ast::*;
 use super::environment::Environment;
 use super::object::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 pub fn eval(node: &Node, environment: Rc<RefCell<Environment>>) -> Object {
@@ -89,7 +90,7 @@ pub fn eval(node: &Node, environment: Rc<RefCell<Environment>>) -> Object {
 
                     apply_function(&function, &arguments)
                 },
-                Expression::StringLiteral(sl) => Object::StringObject(StringObject::new(sl.value.as_str())),
+                Expression::StringLiteral(sl) => Object::String(StringObject::new(sl.value.as_str())),
                 Expression::ArrayLiteral(al) => {
                     let elements = eval_expressions(&al.elements, environment);
                     if elements.len() == 1 && is_error(&elements[0]) {
@@ -111,6 +112,7 @@ pub fn eval(node: &Node, environment: Rc<RefCell<Environment>>) -> Object {
 
                     eval_index_expression(&left, &index)
                 },
+                Expression::HashLiteral(hl) => eval_hash_literal(&hl, environment),
             }
         },
     }
@@ -138,8 +140,8 @@ fn eval_block_statement(block: &BlockStatement, environment: Rc<RefCell<Environm
     for statement in &block.statements {
         result = eval(&Node::Statement(statement.clone()), Rc::clone(&environment));
 
-        if let Object::ReturnValue(rv) = result {
-            return *rv.value.clone();
+        if let Object::ReturnValue(_) = &result {
+            return result;
         } else if let Object::Error(_) = result {
             return result;
         }
@@ -182,7 +184,7 @@ fn eval_infix_expression(operator: &str, left: &Object, right: &Object) -> Objec
     match (left, right) {
         (Object::Integer(l), Object::Integer(r)) => eval_integer_infix_expression(operator, l, r),
         (Object::Boolean(l), Object::Boolean(r)) => eval_boolean_infix_expression(operator, l, r),
-        (Object::StringObject(l), Object::StringObject(r)) => eval_string_infix_expression(operator, l, r),
+        (Object::String(l), Object::String(r)) => eval_string_infix_expression(operator, l, r),
         _ => new_error(format!("type mismatch: {} {} {}", left.type_of(), operator, right.type_of()).as_str()),
     }
 }
@@ -220,7 +222,7 @@ fn eval_string_infix_expression(operator: &str, left: &StringObject, right: &Str
             let right_val = right.value.clone();
             let concatenated = left_val + right_val.as_str();
 
-            Object::StringObject(StringObject::new(concatenated.as_str()))
+            Object::String(StringObject::new(concatenated.as_str()))
         },
         _ => new_error(format!("unknown operator: {} {} {}", left.type_of(), operator, right.type_of()).as_str()),
     }
@@ -308,6 +310,7 @@ fn unwrap_return_value(object: Object) -> Object {
 fn eval_index_expression(left: &Object, index: &Object) -> Object {
     match (left, index) {
         (Object::Array(arr), Object::Integer(idx)) => eval_array_index_expression(arr, idx),
+        (Object::Hash(h), _) => eval_hash_index_expression(h, index),
         _ => new_error(format!("index operator not supported: {}", left.type_of()).as_str()),
     }
 }
@@ -319,6 +322,41 @@ fn eval_array_index_expression(array: &Array, index: &Integer) -> Object {
         Object::Null(Null::new())
     } else {
         array.elements[index.value as usize].clone()
+    }
+}
+
+fn eval_hash_literal(hash: &HashLiteral, environment: Rc<RefCell<Environment>>) -> Object {
+    let mut pairs: HashMap<Object, Object> = HashMap::new();
+
+    for (k, v) in &hash.pairs {
+        let key = eval(&Node::Expression(k.clone()), Rc::clone(&environment));
+        if is_error(&key) {
+            return key;
+        }
+
+        if !key.is_hashable() {
+            return new_error(format!("unusable as hash key: {}", key.type_of()).as_str());
+        }
+
+        let value = eval(&Node::Expression(v.clone()), Rc::clone(&environment));
+        if is_error(&value) {
+            return value;
+        }
+
+        pairs.insert(key, value);
+    }
+
+    Object::Hash(HashObject::new(pairs))
+}
+
+fn eval_hash_index_expression(hash: &HashObject, index: &Object) -> Object {
+    if !index.is_hashable() {
+        return new_error(format!("unusable as hash key: {}", index.type_of()).as_str());
+    }
+
+    match hash.pairs.get(&index) {
+        Some(p) => p.clone(),
+        None => Object::Null(Null::new()),
     }
 }
 
@@ -347,6 +385,7 @@ mod test {
     use super::*;
     use super::super::lexer::Lexer;
     use super::super::parser::Parser;
+    use std::collections::hash_map::HashMap;
 
     #[test]
     fn test_eval_integer_expression() {
@@ -479,11 +518,35 @@ mod test {
             expected: i64,
         };
 
+        let multiline1 = r#"
+if (10 > 1) {
+  if (10 > 1) {
+    return 10;
+  }
+  
+  return 1;
+}"#;
+        let multiline2 = r#"
+let f = fn(x) {
+  return x;
+  x + 10;
+};
+f(10);"#;
+        let multiline3 = r#"
+let f = fn(x) {
+  let result = x + 10;
+  return result;
+  return 10;
+};
+f(10);"#;
         let return_tests = vec![
             ReturnTest { input: "return 10;", expected: 10 },
             ReturnTest { input: "return 10; 9;", expected: 10 },
             ReturnTest { input: "return 2 * 5; 9;", expected: 10 },
             ReturnTest { input: "9; return 2 * 5; 9;", expected: 10 },
+            ReturnTest { input: multiline1, expected: 10 },
+            ReturnTest { input: multiline2, expected: 10 },
+            ReturnTest { input: multiline3, expected: 20 },
         ];
 
         for return_test in return_tests {
@@ -514,11 +577,14 @@ if (10 > 1) {
             ErrorTest { input: "5 + true; 5;", expected: "type mismatch: INTEGER + BOOLEAN" },
             ErrorTest { input: "-true", expected: "unknown operator: -BOOLEAN" },
             ErrorTest { input: "true + false;", expected: "unknown operator: BOOLEAN + BOOLEAN" },
+            ErrorTest { input: "true + false + true + false;;", expected: "unknown operator: BOOLEAN + BOOLEAN" },
             ErrorTest { input: "5; true + false; 5", expected: "unknown operator: BOOLEAN + BOOLEAN" },
             ErrorTest { input: "if (10 > 1) { true + false; }", expected: "unknown operator: BOOLEAN + BOOLEAN" },
             ErrorTest { input: multiline_input, expected: "unknown operator: BOOLEAN + BOOLEAN" },
             ErrorTest { input: "foobar", expected: "identifier not found: foobar" },
             ErrorTest { input: "\"Hello\" - \"World\"", expected: "unknown operator: STRING - STRING" },
+            ErrorTest { input: "{\"name\": \"Monkey\"}[fn(x) { x }];", expected: "unusable as hash key: FUNCTION" },
+            ErrorTest { input: "999[1]", expected: "index operator not supported: INTEGER" },
         ];
 
         for error_test in error_tests {
@@ -600,6 +666,27 @@ if (10 > 1) {
     }
 
     #[test]
+    fn test_enclosing_environments() {
+        let input = r#"
+let first = 10;
+let second = 10;
+let third = 10;
+
+let ourFunction = fn(first) {
+  let second = 20;
+  
+  first + second + third;
+};
+
+ourFunction(20) + first + second;"#;
+
+        match test_eval(input) {
+            Some(e) => test_integer_object(&e, 70),
+            None => assert!(false, "Program could not be evaluated."),
+        }
+    }
+
+    #[test]
     fn test_closures() {
         let input = r#"
 let newAdder = fn(x) {
@@ -622,7 +709,7 @@ addTwo(2);"#;
         match test_eval(input) {
             Some(e) => {
                 match e {
-                    Object::StringObject(so) => assert_eq!(so.value, "Hello World!"),
+                    Object::String(so) => assert_eq!(so.value, "Hello World!"),
                     _ => assert!(false, "Object was not a StringObject"),
                 }
             },
@@ -637,7 +724,7 @@ addTwo(2);"#;
         match test_eval(input) {
             Some(e) => {
                 match e {
-                    Object::StringObject(so) => assert_eq!(so.value, "Hello World!"),
+                    Object::String(so) => assert_eq!(so.value, "Hello World!"),
                     _ => assert!(false, "Object was not a StringObject"),
                 }
             },
@@ -656,20 +743,21 @@ addTwo(2);"#;
             BuiltinTest { input: "len(\"\")", expected: Object::Integer(Integer::new(0)) },
             BuiltinTest { input: "len(\"four\")", expected: Object::Integer(Integer::new(4)) },
             BuiltinTest { input: "len(\"hello world\")", expected: Object::Integer(Integer::new(11)) },
-            BuiltinTest { input: "len(1)", expected: Object::StringObject(StringObject::new("argument to \"len\" not supported, got INTEGER")) },
-            BuiltinTest { input: "len(\"one\", \"two\")", expected: Object::StringObject(StringObject::new("wrong number of arguments. got 2, want 1")) },
+            BuiltinTest { input: "len(1)", expected: Object::String(StringObject::new("argument to \"len\" not supported, got INTEGER")) },
+            BuiltinTest { input: "len(\"one\", \"two\")", expected: Object::String(StringObject::new("wrong number of arguments. got 2, want 1")) },
             BuiltinTest { input: "len([1, 2, 3])", expected: Object::Integer(Integer::new(3)) },
             BuiltinTest { input: "len([])", expected: Object::Integer(Integer::new(0)) },
+            BuiltinTest { input: "puts(\"hello\", \"world!\")", expected: Object::Null(Null::new()) },
             BuiltinTest { input: "first([1, 2, 3])", expected: Object::Integer(Integer::new(1)) },
             BuiltinTest { input: "first([])", expected: Object::Null(Null::new()) },
-            BuiltinTest { input: "first(1)", expected: Object::StringObject(StringObject::new("argument to \"first\" must be ARRAY, got INTEGER")) },
+            BuiltinTest { input: "first(1)", expected: Object::String(StringObject::new("argument to \"first\" must be ARRAY, got INTEGER")) },
             BuiltinTest { input: "last([1, 2, 3])", expected: Object::Integer(Integer::new(3)) },
             BuiltinTest { input: "last([])", expected: Object::Null(Null::new()) },
-            BuiltinTest { input: "last(1)", expected: Object::StringObject(StringObject::new("argument to \"last\" must be ARRAY, got INTEGER")) },
+            BuiltinTest { input: "last(1)", expected: Object::String(StringObject::new("argument to \"last\" must be ARRAY, got INTEGER")) },
             BuiltinTest { input: "rest([1, 2, 3])", expected: Object::Array(Array::new(vec![Object::Integer(Integer::new(2)), Object::Integer(Integer::new(3))])) },
             BuiltinTest { input: "rest([])", expected: Object::Null(Null::new()) },
             BuiltinTest { input: "push([], 1)", expected: Object::Array(Array::new(vec![Object::Integer(Integer::new(1))])) },
-            BuiltinTest { input: "push(1, 1)", expected: Object::StringObject(StringObject::new("argument to \"push\" must be ARRAY, got INTEGER")) },
+            BuiltinTest { input: "push(1, 1)", expected: Object::String(StringObject::new("argument to \"push\" must be ARRAY, got INTEGER")) },
         ];
 
         for builtin_test in builtin_tests {
@@ -678,7 +766,7 @@ addTwo(2);"#;
                     match (&e, &builtin_test.expected) {
                         (Object::Integer(_), Object::Integer(exp)) => test_integer_object(&e, exp.value),
                         (Object::Null(_), Object::Null(_)) => test_null_object(&e),
-                        (Object::Error(act), Object::StringObject(exp)) => assert_eq!(act.message, exp.value),
+                        (Object::Error(act), Object::String(exp)) => assert_eq!(act.message, exp.value),
                         (Object::Array(act), Object::Array(exp)) => {
                             assert_eq!(act.elements.len(), exp.elements.len());
                             for (i, elem) in exp.elements.iter().enumerate() {
@@ -740,6 +828,75 @@ addTwo(2);"#;
             match test_eval(index_test.input) {
                 Some(e) => {
                     match (&e, &index_test.expected) {
+                        (Object::Integer(_), Object::Integer(exp)) => test_integer_object(&e, exp.value),
+                        (Object::Null(_), Object::Null(_)) => test_null_object(&e),
+                        _ => assert!(false, "Object type was not recognized."),
+                    }
+                },
+                None => assert!(false, "Program could not be evaluated."),
+            }
+        }
+    }
+
+    #[test]
+    fn test_hash_literals() {
+        let input = r#"let two = "two";
+{
+    "one": 10 - 9,
+    two: 1 + 1,
+    "thr" + "ee": 6 / 2,
+    4: 4,
+    true: 5,
+    false: 6
+}"#;
+
+        let mut expected: HashMap<Object, i64> = HashMap::new();
+        expected.insert(Object::String(StringObject::new("one")), 1);
+        expected.insert(Object::String(StringObject::new("two")), 2);
+        expected.insert(Object::String(StringObject::new("three")), 3);
+        expected.insert(Object::Integer(Integer::new(4)), 4);
+        expected.insert(Object::Boolean(Boolean::new(true)), 5);
+        expected.insert(Object::Boolean(Boolean::new(false)), 6);
+        match test_eval(input) {
+            Some(e) => {
+                match e {
+                    Object::Hash(h) => {
+                        assert_eq!(h.pairs.len(), expected.len());
+                        for (expected_key, expected_value) in expected {
+                            match h.pairs.get(&expected_key) {
+                                Some(p) => test_integer_object(&p, expected_value),
+                                None => assert!(false, "Key not found in HashObject pairs."),
+                            }
+                        }
+                    },
+                    _ => assert!(false, "Object was not a Hash."),
+                }
+            },
+            None => assert!(false, "Program could not be evaluated."),
+        }
+    }
+
+    #[test]
+    fn test_hash_index_expressions() {
+        struct HashIndexTest<'a> {
+            input: &'a str,
+            expected: Object,
+        };
+
+        let hash_index_tests = vec![
+            HashIndexTest { input: "{\"foo\": 5}[\"foo\"]", expected: Object::Integer(Integer::new(5)) },
+            HashIndexTest { input: "{\"foo\": 5}[\"bar\"]", expected: Object::Null(Null::new()) },
+            HashIndexTest { input: "let key = \"foo\"; {\"foo\": 5}[key]", expected: Object::Integer(Integer::new(5)) },
+            HashIndexTest { input: "{}[\"foo\"]", expected: Object::Null(Null::new()) },
+            HashIndexTest { input: "{5: 5}[5]", expected: Object::Integer(Integer::new(5)) },
+            HashIndexTest { input: "{true: 5}[true]", expected: Object::Integer(Integer::new(5)) },
+            HashIndexTest { input: "{false: 5}[false]", expected: Object::Integer(Integer::new(5)) },
+        ];
+
+        for hash_index_test in hash_index_tests {
+            match test_eval(hash_index_test.input) {
+                Some(e) => {
+                    match (&e, &hash_index_test.expected) {
                         (Object::Integer(_), Object::Integer(exp)) => test_integer_object(&e, exp.value),
                         (Object::Null(_), Object::Null(_)) => test_null_object(&e),
                         _ => assert!(false, "Object type was not recognized."),

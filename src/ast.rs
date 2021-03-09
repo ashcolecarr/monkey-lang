@@ -1,5 +1,7 @@
 use super::token::Token;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result};
+use std::hash::{Hash, Hasher};
 
 pub enum Node {
     Statement(Statement),
@@ -27,7 +29,7 @@ impl Node {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub enum Statement {
     LetStatement(LetStatement),
     ReturnStatement(ReturnStatement),
@@ -57,7 +59,7 @@ impl Statement {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct LetStatement {
     pub token: Token,
     pub name: Identifier,
@@ -81,7 +83,7 @@ impl LetStatement {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ReturnStatement {
     pub token: Token,
     pub return_value: Option<Expression>,
@@ -104,7 +106,7 @@ impl ReturnStatement {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ExpressionStatement {
     pub token: Token,
     pub expression: Option<Expression>,
@@ -126,7 +128,7 @@ impl ExpressionStatement {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct BlockStatement {
     pub token: Token,
     pub statements: Vec<Statement>,
@@ -149,7 +151,7 @@ impl BlockStatement {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub enum Expression {
     Identifier(Identifier),
     IntegerLiteral(IntegerLiteral),
@@ -162,6 +164,7 @@ pub enum Expression {
     StringLiteral(StringLiteral),
     ArrayLiteral(ArrayLiteral),
     IndexExpression(IndexExpression),
+    HashLiteral(HashLiteral),
 }
 
 impl Display for Expression {
@@ -178,6 +181,7 @@ impl Display for Expression {
             Self::StringLiteral(sl) => format!("{}", sl),
             Self::ArrayLiteral(al) => format!("{}", al),
             Self::IndexExpression(ie) => format!("{}", ie),
+            Self::HashLiteral(hl) => format!("{}", hl),
         })
     }
 }
@@ -196,11 +200,12 @@ impl Expression {
             Self::StringLiteral(sl) => sl.token.literal.as_str(),
             Self::ArrayLiteral(al) => al.token.literal.as_str(),
             Self::IndexExpression(ie) => ie.token.literal.as_str(),
+            Self::HashLiteral(hl) => hl.token.literal.as_str(),
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Identifier {
     pub token: Token,
     pub value: String,
@@ -218,7 +223,7 @@ impl Identifier {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct IntegerLiteral {
     pub token: Token,
     pub value: i64,
@@ -236,7 +241,7 @@ impl IntegerLiteral {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct PrefixExpression {
     pub token: Token,
     pub operator: String,
@@ -255,7 +260,7 @@ impl PrefixExpression {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct InfixExpression {
     pub token: Token,
     pub left: Box<Expression>,
@@ -275,7 +280,7 @@ impl InfixExpression {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct BooleanLiteral {
     pub token: Token,
     pub value: bool,
@@ -293,7 +298,7 @@ impl BooleanLiteral {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct IfExpression {
     pub token: Token,
     pub condition: Box<Expression>,
@@ -316,7 +321,7 @@ impl IfExpression {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct FunctionLiteral {
     pub token: Token,
     pub parameters: Vec<Identifier>,
@@ -337,7 +342,7 @@ impl FunctionLiteral {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct CallExpression {
     pub token: Token,
     pub function: Box<Expression>,
@@ -358,7 +363,7 @@ impl CallExpression {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct StringLiteral {
     pub token: Token,
     pub value: String,
@@ -376,7 +381,7 @@ impl StringLiteral {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ArrayLiteral {
     pub token: Token,
     pub elements: Vec<Expression>,
@@ -396,7 +401,7 @@ impl ArrayLiteral {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct IndexExpression {
     pub token: Token,
     pub left: Box<Expression>,
@@ -412,6 +417,36 @@ impl Display for IndexExpression {
 impl IndexExpression {
     pub fn new(token: Token, left: Box<Expression>, index: Box<Expression>) -> Self {
         Self { token, left, index }
+    }
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct HashLiteral {
+    pub token: Token,
+    pub pairs: HashMap<Expression, Expression>,
+}
+
+impl Display for HashLiteral {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let mut pairs = vec![];
+        for (key, value) in &self.pairs {
+            pairs.push(format!("{}:{}", key, value));
+        }
+
+        write!(f, "{{{}}}", pairs.join(", "))
+    }
+}
+
+// Rust requires that Hash be implemented here, but it is not a valid key for hashing.
+impl Hash for HashLiteral {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        panic!("HashLiteral is not valid for hashing.");
+    }
+}
+
+impl HashLiteral {
+    pub fn new(token: Token, pairs: HashMap<Expression, Expression>) -> Self {
+        Self { token, pairs }
     }
 }
 

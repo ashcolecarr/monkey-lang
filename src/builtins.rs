@@ -1,5 +1,6 @@
 use super::object::*;
 use std::collections::HashMap;
+use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
 pub struct Builtins {
@@ -15,6 +16,7 @@ impl Builtins {
         builtin_object.builtins.insert(String::from("last"), Self::last);
         builtin_object.builtins.insert(String::from("rest"), Self::rest);
         builtin_object.builtins.insert(String::from("push"), Self::push);
+        builtin_object.builtins.insert(String::from("puts"), Self::puts);
 
         builtin_object
     }
@@ -34,7 +36,7 @@ impl Builtins {
 
         match &arguments[0] {
             Object::Array(arr) => Object::Integer(Integer::new(arr.elements.len() as i64)),
-            Object::StringObject(so) => Object::Integer(Integer::new(so.value.len() as i64)),
+            Object::String(s) => Object::Integer(Integer::new(s.value.len() as i64)),
             _ => Object::Error(Error::new(
                 format!("argument to \"len\" not supported, got {}", arguments[0].type_of()).as_str())),
         }
@@ -114,5 +116,20 @@ impl Builtins {
             _ => Object::Error(Error::new(
                 format!("argument to \"push\" must be ARRAY, got {}", arguments[0].type_of()).as_str())),
         }
+    }
+
+    fn puts(arguments: &Vec<Object>) -> Object {
+        for arg in arguments {
+            println!("{}", arg);
+        }
+
+        Object::Null(Null::new())
+    }
+}
+
+// Rust requires that Hash be implemented here, but it is not a valid key for hashing.
+impl Hash for Builtins {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        panic!("Environment is not valid for hashing.");
     }
 }

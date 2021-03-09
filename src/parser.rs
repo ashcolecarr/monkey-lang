@@ -50,6 +50,7 @@ impl Parser {
         parser.prefix_parse_fns.insert(TokenType::Function, Self::parse_function_literal);
         parser.prefix_parse_fns.insert(TokenType::String, Self::parse_string_literal);
         parser.prefix_parse_fns.insert(TokenType::LBracket, Self::parse_array_literal);
+        parser.prefix_parse_fns.insert(TokenType::LBrace, Self::parse_hash_literal);
 
         parser.infix_parse_fns.insert(TokenType::Plus, Self::parse_infix_expression);
         parser.infix_parse_fns.insert(TokenType::Minus, Self::parse_infix_expression);
@@ -326,6 +327,36 @@ impl Parser {
             Some(elems) => Some(Expression::ArrayLiteral(ArrayLiteral::new(current_token, elems))),
             None => None,
         }
+    }
+
+    fn parse_hash_literal(&mut self) -> Option<Expression> {
+        let current_token = self.current_token.clone();
+        let mut pairs: HashMap<Expression, Expression> = HashMap::new();
+
+        while !self.peek_token_is(&TokenType::RBrace) {
+            self.next_token();
+            let key = self.parse_expression(&Precedence::Lowest);
+            if !self.expect_peek(&TokenType::Colon) {
+                return None;
+            }
+
+            self.next_token();
+            let value = self.parse_expression(&Precedence::Lowest);
+            if !self.peek_token_is(&TokenType::RBrace) && !self.expect_peek(&TokenType::Comma) {
+                return None;
+            }
+
+            match (key, value) {
+                (Some(k), Some(v)) => pairs.insert(k, v),
+                _ => return None,
+            };
+        }
+
+        if !self.expect_peek(&TokenType::RBrace) {
+            return None;
+        }
+
+        Some(Expression::HashLiteral(HashLiteral::new(current_token, pairs)))
     }
 
     fn parse_expression_list(&mut self, end: &TokenType) -> Option<Vec<Expression>> {
@@ -667,6 +698,8 @@ mod test {
         let prefix_tests = vec![
             PrefixTest { input: "!5", operator: "!", value: ExpressionType::Int(5) },
             PrefixTest { input: "-15", operator: "-", value: ExpressionType::Int(15) },
+            PrefixTest { input: "!foobar;", operator: "!", value: ExpressionType::String(String::from("foobar")) },
+            PrefixTest { input: "-foobar;", operator: "-", value: ExpressionType::String(String::from("foobar")) },
             PrefixTest { input: "!true", operator: "!", value: ExpressionType::Bool(true) },
             PrefixTest { input: "!false", operator: "!", value: ExpressionType::Bool(false) },
         ];
@@ -690,9 +723,9 @@ mod test {
                                         Expression::PrefixExpression(pe) => {
                                             assert_eq!(pe.operator, prefix_test.operator);
                                             match prefix_test.value {
-                                                ExpressionType::Int(i) => test_integer_literal(&pe.right, i),
-                                                ExpressionType::Bool(b) => test_boolean_literal(&pe.right, b),
-                                                _ => assert!(false, "Expression type was not supported."),
+                                                ExpressionType::Int(i) => test_literal_expression(&pe.right, i),
+                                                ExpressionType::Bool(b) => test_literal_expression(&pe.right, b),
+                                                ExpressionType::String(s) => test_literal_expression(&pe.right, s),
                                             }
                                         },
                                         _ => assert!(false, "Expression was not a PrefixExpression."),
@@ -727,6 +760,14 @@ mod test {
             InfixTest { input: "5 < 5;", left_value: ExpressionType::Int(5), operator: "<", right_value: ExpressionType::Int(5) },
             InfixTest { input: "5 == 5;", left_value: ExpressionType::Int(5), operator: "==", right_value: ExpressionType::Int(5) },
             InfixTest { input: "5 != 5;", left_value: ExpressionType::Int(5), operator: "!=", right_value: ExpressionType::Int(5) },
+            InfixTest { input: "foobar + barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "+", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar - barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "-", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar * barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "*", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar / barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "/", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar > barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: ">", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar < barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "<", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar == barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "==", right_value: ExpressionType::String(String::from("barfoo"))},
+            InfixTest { input: "foobar != barfoo;", left_value: ExpressionType::String(String::from("foobar")), operator: "!=", right_value: ExpressionType::String(String::from("barfoo"))},
             InfixTest { input: "true == true", left_value: ExpressionType::Bool(true), operator: "==", right_value: ExpressionType::Bool(true) },
             InfixTest { input: "true != false", left_value: ExpressionType::Bool(true), operator: "!=", right_value: ExpressionType::Bool(false) },
             InfixTest { input: "false == false", left_value: ExpressionType::Bool(false), operator: "==", right_value: ExpressionType::Bool(false) },
@@ -750,6 +791,7 @@ mod test {
                                     match (infix_test.left_value, infix_test.right_value) {
                                         (ExpressionType::Int(l), ExpressionType::Int(r)) => test_infix_expression(ex, l, infix_test.operator, r),
                                         (ExpressionType::Bool(l), ExpressionType::Bool(r)) => test_infix_expression(ex, l, infix_test.operator, r),
+                                        (ExpressionType::String(l), ExpressionType::String(r)) => test_infix_expression(ex, l, infix_test.operator, r),
                                         _ => assert!(false, "Expression types were not supported."),
                                     };
                                 },
@@ -1100,6 +1142,55 @@ mod test {
     }
 
     #[test]
+    fn test_call_expression_parameter_parsing() {
+        struct ParameterTest<'a> {
+            input: &'a str,
+            expected_identifier: &'a str,
+            expected_arguments: Vec<&'a str>,
+        };
+
+        let parameter_tests = vec![
+            ParameterTest { input: "add();", expected_identifier: "add", expected_arguments: vec![] },
+            ParameterTest { input: "add(1);", expected_identifier: "add", expected_arguments: vec!["1"] },
+            ParameterTest { input: "add(1, 2 * 3, 4 + 5);", expected_identifier: "add", expected_arguments: vec!["1", "(2 * 3)", "(4 + 5)"] },
+        ];
+
+        for parameter_test in parameter_tests {
+            let lexer = Lexer::new(parameter_test.input);
+            let mut parser = Parser::new(lexer);
+    
+            let program = parser.parse_program();
+            check_parser_errors(&parser);
+
+            match program {
+                Some(p) => {
+                    match &p.statements[0] {
+                        Statement::ExpressionStatement(es) => {
+                            match &es.expression {
+                                Some(ex) => {
+                                    match ex {
+                                        Expression::CallExpression(ce) => {
+                                            test_identifier(&ce.function, parameter_test.expected_identifier);
+                                            assert_eq!(ce.arguments.len(), parameter_test.expected_arguments.len());
+                                            for (i, param) in parameter_test.expected_arguments.iter().enumerate() {
+                                                assert_eq!(format!("{}", ce.arguments[i]).as_str(), *param);
+                                            }
+                                        },
+                                        _ => assert!(false, "Expression was not a CallExpression."),
+                                    };
+                                },
+                                None => assert!(false, "Expression could not be parsed."),
+                            }
+                        },
+                        _ => assert!(false, "Statement was not an ExpressionStatement."),
+                    };
+                },
+                None => assert!(false, "Program could not be parsed."),
+            };
+        }
+    }
+
+    #[test]
     fn test_string_literal_expression() {
         let input = "\"hello world\";";
 
@@ -1123,6 +1214,41 @@ mod test {
                                         assert_eq!(sl.token.literal, "hello world");
                                     },
                                     _ => assert!(false, "Expression was not a StringLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_empty_array_literals() {
+        let input = "[]";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::ArrayLiteral(al) => {
+                                        assert_eq!(al.elements.len(), 0);
+                                    },
+                                    _ => assert!(false, "Expression was not an ArrayLiteral."),
                                 };
                             },
                             None => assert!(false, "Expression could not be parsed."),
@@ -1197,6 +1323,218 @@ mod test {
                                         test_infix_expression(&ie.index, 1, "+", 1);
                                     },
                                     _ => assert!(false, "Expression was not an IndexExpression."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_hash_literals_string_keys() {
+        let input = "{\"one\": 1, \"two\": 2, \"three\": 3}";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        let expected: HashMap<&str, i64> = [("one", 1), ("two", 2), ("three", 3)].iter().cloned().collect();
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::HashLiteral(hl) => {
+                                        assert_eq!(hl.pairs.len(), expected.len());
+                                        for (key, value) in &hl.pairs {
+                                            match key {
+                                                Expression::StringLiteral(sl) => test_integer_literal(&value, expected[format!("{}", sl.value).as_str()]),
+                                                _ => assert!(false, "Expression was not a StringLiteral."),
+                                            }
+                                        }
+                                    },
+                                    _ => assert!(false, "Expression was not a HashLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_hash_literals_boolean_keys() {
+        let input = "{true: 1, false: 2}";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        let expected: HashMap<&str, i64> = [("true", 1), ("false", 2)].iter().cloned().collect();
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::HashLiteral(hl) => {
+                                        assert_eq!(hl.pairs.len(), expected.len());
+                                        for (key, value) in &hl.pairs {
+                                            match key {
+                                                Expression::BooleanLiteral(bl) => test_integer_literal(&value, expected[format!("{}", bl.value).as_str()]),
+                                                _ => assert!(false, "Expression was not a BooleanLiteral."),
+                                            }
+                                        }
+                                    },
+                                    _ => assert!(false, "Expression was not a HashLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_hash_literals_integer_keys() {
+        let input = "{1: 1, 2: 2, 3: 3}";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        let expected: HashMap<&str, i64> = [("1", 1), ("2", 2), ("3", 3)].iter().cloned().collect();
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::HashLiteral(hl) => {
+                                        assert_eq!(hl.pairs.len(), expected.len());
+                                        for (key, value) in &hl.pairs {
+                                            match key {
+                                                Expression::IntegerLiteral(il) => test_integer_literal(&value, expected[format!("{}", il.value).as_str()]),
+                                                _ => assert!(false, "Expression was not an IntegerLiteral."),
+                                            }
+                                        }
+                                    },
+                                    _ => assert!(false, "Expression was not a HashLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_empty_hash_literal() {
+        let input = "{}";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::HashLiteral(hl) => assert_eq!(hl.pairs.len(), 0),
+                                    _ => assert!(false, "Expression was not a HashLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_parsing_hash_literals_with_expressions() {
+        struct ExpressionTest<'a> {
+            left: i64,
+            operator: &'a str,
+            right: i64,
+        };
+        let input = "{\"one\": 0 + 1, \"two\": 10 - 8, \"three\": 15 / 5}";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        let mut expected: HashMap<&str, ExpressionTest> = HashMap::new();
+        expected.insert("one", ExpressionTest { left: 0, operator: "+", right: 1 }); 
+        expected.insert("two", ExpressionTest { left: 10, operator: "-", right: 8 }); 
+        expected.insert("three", ExpressionTest { left: 15, operator: "/", right: 5 }); 
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::ExpressionStatement(es) => {
+                        match &es.expression {
+                            Some(ex) => {
+                                match ex {
+                                    Expression::HashLiteral(hl) => {
+                                        assert_eq!(hl.pairs.len(), expected.len());
+                                        for (key, value) in &hl.pairs {
+                                            match (key, value) {
+                                                (Expression::StringLiteral(sl), Expression::InfixExpression(_)) => {
+                                                    let expected_value = &expected[format!("{}", sl.value).as_str()];
+                                                    test_infix_expression(value, expected_value.left, expected_value.operator, expected_value.right);
+                                                },
+                                                _ => assert!(false, "Expressions were not a StringLiteral and an InfixExpression."),
+                                            }
+                                        }
+                                    },
+                                    _ => assert!(false, "Expression was not a HashLiteral."),
                                 };
                             },
                             None => assert!(false, "Expression could not be parsed."),

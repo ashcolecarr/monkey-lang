@@ -31,6 +31,7 @@ pub enum TokenType {
     RBrace,
     LBracket,
     RBracket,
+    Colon,
 
     // Keywords
     Function,
@@ -68,6 +69,7 @@ impl Display for TokenType {
             TokenType::RBrace => "}",
             TokenType::LBracket => "[",
             TokenType::RBracket => "]",
+            TokenType::Colon => ":",
             TokenType::Function => "function",
             TokenType::Let => "let",
             TokenType::True => "true",
@@ -79,7 +81,7 @@ impl Display for TokenType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Token {
     pub token_type: TokenType,
     pub literal: String,

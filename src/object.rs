@@ -1,7 +1,9 @@
 use super::ast::{BlockStatement, Identifier};
 use super::environment::Environment;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter, Result};
+use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 const INTEGER_OBJ: &str = "INTEGER";
@@ -13,10 +15,11 @@ const FUNCTION_OBJ: &str = "FUNCTION";
 const STRING_OBJ: &str = "STRING"; 
 const BUILTIN_OBJ: &str = "BUILTIN"; 
 const ARRAY_OBJ: &str = "ARRAY"; 
+const HASH_OBJ: &str = "HASH"; 
 
 pub type BuiltinFunction = fn(arguments: &Vec<Object>) -> Object;
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub enum Object {
     NonPrint, // Non printed debug object to satisfy return requirement.
     Integer(Integer),
@@ -25,9 +28,10 @@ pub enum Object {
     ReturnValue(ReturnValue),
     Error(Error),
     Function(Function),
-    StringObject(StringObject),
+    String(StringObject),
     Builtin(Builtin),
     Array(Array),
+    Hash(HashObject)
 }
 
 impl Display for Object {
@@ -40,15 +44,15 @@ impl Display for Object {
             Self::ReturnValue(rv) => format!("{}", rv),
             Self::Error(e) => format!("{}", e),
             Self::Function(f) => format!("{}", f),
-            Self::StringObject(so) => format!("{}", so),
+            Self::String(s) => format!("{}", s),
             Self::Builtin(b) => format!("{}", b),
             Self::Array(a) => format!("{}", a),
+            Self::Hash(h) => format!("{}", h),
         })
     }
 }
 
 impl Object {
-
     pub fn type_of(&self) -> &str {
         match self {
             Self::NonPrint => "",
@@ -58,14 +62,22 @@ impl Object {
             Self::ReturnValue(rv) => rv.type_of(),
             Self::Error(e) => e.type_of(),
             Self::Function(f) => f.type_of(),
-            Self::StringObject(so) => so.type_of(),
+            Self::String(so) => so.type_of(),
             Self::Builtin(b) => b.type_of(),
             Self::Array(a) => a.type_of(),
+            Self::Hash(h) => h.type_of(),
+        }
+    }
+
+    pub fn is_hashable(&self) -> bool {
+        match self {
+            Self::Integer(_) | Self::Boolean(_) | Self::String(_) => true,
+            _ => false,
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Integer {
     pub value: i64,
 }
@@ -86,7 +98,7 @@ impl Integer {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Boolean {
     pub value: bool,
 }
@@ -107,7 +119,7 @@ impl Boolean {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Null { }
 
 impl Display for Null {
@@ -126,7 +138,7 @@ impl Null {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct ReturnValue {
     pub value: Box<Object>,
 }
@@ -147,7 +159,7 @@ impl ReturnValue {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Error {
     pub message: String,
 }
@@ -183,6 +195,19 @@ impl Display for Function {
     }
 }
 
+impl PartialEq for Function {
+    fn eq(&self, _other: &Function) -> bool {
+        panic!("PartialEq is not supported for Function.");
+    }
+}
+impl Eq for Function {}
+
+impl Hash for Function {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        panic!("Hash is not supported for Function.");
+    }
+}
+
 impl Function {
     pub fn new(parameters: Vec<Identifier>, body: BlockStatement, environment: Rc<RefCell<Environment>>) -> Self {
         Self { parameters, body, environment }
@@ -193,7 +218,7 @@ impl Function {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct StringObject {
     pub value: String,
 }
@@ -225,6 +250,20 @@ impl Display for Builtin {
     }
 }
 
+impl PartialEq for Builtin {
+    fn eq(&self, _other: &Builtin) -> bool {
+        panic!("PartialEq is not supported for Builtin.");
+    }
+}
+
+impl Eq for Builtin {}
+
+impl Hash for Builtin {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        panic!("Hash is not supported for Builtin.");
+    }
+}
+
 impl Builtin {
     pub fn new(builtin_function: BuiltinFunction) -> Self {
         Self { builtin_function }
@@ -235,7 +274,7 @@ impl Builtin {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Array {
     pub elements: Vec<Object>,
 }
@@ -255,5 +294,126 @@ impl Array {
 
     pub fn type_of(&self) -> &str {
         ARRAY_OBJ
+    }
+}
+
+#[derive(Clone)]
+pub struct HashObject {
+    pub pairs: HashMap<Object, Object>,
+}
+
+impl Display for HashObject {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        let pairs: Vec<String> = self.pairs.iter().map(|(k, v)| format!("{}: {}", k, v)).collect();
+
+        write!(f, "{{{}}}", pairs.join(", "))
+    }
+}
+
+impl PartialEq for HashObject {
+    fn eq(&self, _other: &HashObject) -> bool {
+        panic!("PartialEq is not supported for HashObject.");
+    }
+}
+
+impl Eq for HashObject {}
+
+impl Hash for HashObject {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        panic!("Hash is not supported for HashObject.");
+    }
+}
+
+impl HashObject {
+    pub fn new(pairs: HashMap<Object, Object>) -> Self {
+        Self { pairs }
+    }
+
+    pub fn type_of(&self) -> &str {
+        HASH_OBJ
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use std::collections::hash_map::DefaultHasher;
+
+    #[test]
+    fn test_string_hash_key() {
+        let hello1 = Object::String(StringObject::new("Hello World"));
+        let hello2 = Object::String(StringObject::new("Hello World"));
+        let diff1 = Object::String(StringObject::new("my name is johnny"));
+        let diff2 = Object::String(StringObject::new("my name is johnny"));
+
+        let mut hasher1 = DefaultHasher::new();
+        hello1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        hello2.hash(&mut hasher2);
+        assert_eq!(hasher1.finish(), hasher2.finish());
+
+        let mut hasher1 = DefaultHasher::new();
+        diff1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        diff2.hash(&mut hasher2);
+        assert_eq!(hasher1.finish(), hasher2.finish());
+
+        let mut hasher1 = DefaultHasher::new();
+        hello1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        diff1.hash(&mut hasher2);
+        assert_ne!(hasher1.finish(), hasher2.finish());
+    }
+
+    #[test]
+    fn test_boolean_hash_key() {
+        let hello1 = Object::Boolean(Boolean::new(true));
+        let hello2 = Object::Boolean(Boolean::new(true));
+        let diff1 = Object::Boolean(Boolean::new(false));
+        let diff2 = Object::Boolean(Boolean::new(false));
+
+        let mut hasher1 = DefaultHasher::new();
+        hello1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        hello2.hash(&mut hasher2);
+        assert_eq!(hasher1.finish(), hasher2.finish());
+
+        let mut hasher1 = DefaultHasher::new();
+        diff1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        diff2.hash(&mut hasher2);
+        assert_eq!(hasher1.finish(), hasher2.finish());
+
+        let mut hasher1 = DefaultHasher::new();
+        hello1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        diff1.hash(&mut hasher2);
+        assert_ne!(hasher1.finish(), hasher2.finish());
+    }
+
+    #[test]
+    fn test_integer_hash_key() {
+        let hello1 = Object::Integer(Integer::new(1));
+        let hello2 = Object::Integer(Integer::new(1));
+        let diff1 = Object::Integer(Integer::new(2));
+        let diff2 = Object::Integer(Integer::new(2));
+
+        let mut hasher1 = DefaultHasher::new();
+        hello1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        hello2.hash(&mut hasher2);
+        assert_eq!(hasher1.finish(), hasher2.finish());
+
+        let mut hasher1 = DefaultHasher::new();
+        diff1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        diff2.hash(&mut hasher2);
+        assert_eq!(hasher1.finish(), hasher2.finish());
+
+        let mut hasher1 = DefaultHasher::new();
+        hello1.hash(&mut hasher1);
+        let mut hasher2 = DefaultHasher::new();
+        diff1.hash(&mut hasher2);
+        assert_ne!(hasher1.finish(), hasher2.finish());
     }
 }
