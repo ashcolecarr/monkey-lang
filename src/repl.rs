@@ -57,10 +57,8 @@ pub fn start() {
                         continue;
                     }
 
-                    let stack_top = machine.stack_top();
-                    if let Some(st) = stack_top {
-                        println!("{}", st);
-                    }
+                    let last_popped = machine.last_popped_stack_element();
+                    println!("{}", last_popped);
                 }
             },
             Err(e) => eprintln!("Error: {}", e),

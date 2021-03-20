@@ -43,6 +43,8 @@ impl Compiler {
                                 return Err(e);
                             }
                         }
+
+                        self.emit(OpCode::OpPop, vec![]);
                     },
                     _ => (),
                 }
@@ -50,6 +52,20 @@ impl Compiler {
             Node::Expression(exp) => {
                 match exp {
                     Expression::InfixExpression(ie) => {
+                        if ie.operator.as_str() == "<" {
+                            if let Err(e) = self.compile(&Node::Expression(*ie.right.clone())) {
+                                return Err(e);
+                            }
+
+                            if let Err(e) = self.compile(&Node::Expression(*ie.left.clone())) {
+                                return Err(e);
+                            }
+
+                            self.emit(OpCode::OpGreaterThan, vec![]);
+
+                            return Ok(());
+                        }
+
                         if let Err(e) = self.compile(&Node::Expression(*ie.left.clone())) {
                             return Err(e);
                         }
@@ -60,6 +76,12 @@ impl Compiler {
 
                         match ie.operator.as_str() {
                             "+" => self.emit(OpCode::OpAdd, vec![]),
+                            "-" => self.emit(OpCode::OpSub, vec![]),
+                            "*" => self.emit(OpCode::OpMul, vec![]),
+                            "/" => self.emit(OpCode::OpDiv, vec![]),
+                            ">" => self.emit(OpCode::OpGreaterThan, vec![]),
+                            "==" => self.emit(OpCode::OpEqual, vec![]),
+                            "!=" => self.emit(OpCode::OpNotEqual, vec![]),
                             _ => return Err(format!("unknown operator {}", ie.operator)),
                         };
                     },
@@ -68,6 +90,24 @@ impl Compiler {
                         
                         let position = self.add_constant(integer) as i64;
                         self.emit(OpCode::OpConstant, vec![position]);
+                    },
+                    Expression::BooleanLiteral(bl) => {
+                        if bl.value {
+                            self.emit(OpCode::OpTrue, vec![]);
+                        } else {
+                            self.emit(OpCode::OpFalse, vec![]);
+                        }
+                    },
+                    Expression::PrefixExpression(pe) => {
+                        if let Err(e) = self.compile(&Node::Expression(*pe.right.clone())) {
+                            return Err(e);
+                        }
+
+                        match pe.operator.as_str() {
+                            "!" => self.emit(OpCode::OpBang, vec![]),
+                            "-" => self.emit(OpCode::OpMinus, vec![]),
+                            _ => return Err(format!("unknown operator {}", pe.operator)),
+                        };
                     },
                     _ => (),
                 }
@@ -107,12 +147,6 @@ mod test {
     use super::*;
     use super::super::lexer::Lexer;
     use super::super::parser::Parser;
-
-    //enum DataType {
-    //    Int(i64),
-    //    //Bool(bool),
-    //    //String(String),
-    //}
 
     trait ValueType {
         fn get_type(&self) -> &str;
@@ -157,9 +191,152 @@ mod test {
                 expected_instructions: vec![
                     make(OpCode::OpConstant, vec![0]), 
                     make(OpCode::OpConstant, vec![1]), 
-                    make(OpCode::OpAdd, vec![])
+                    make(OpCode::OpAdd, vec![]),
+                    make(OpCode::OpPop, vec![]),
                 ]
-            }
+            },
+            CompilerTestCase {
+                input: "1; 2",
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpPop, vec![]),
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "1 - 2",
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpSub, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "1 * 2",
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpMul, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "2 / 1",
+                expected_constants: vec![2, 1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpDiv, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "-1",
+                expected_constants: vec![1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpMinus, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiler_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_boolean_expressions() {
+        let compiler_test_cases = vec![
+            CompilerTestCase {
+                input: "true",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpTrue, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "false",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpFalse, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "1 > 2",
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpGreaterThan, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "1 < 2",
+                expected_constants: vec![2, 1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpGreaterThan, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "1 == 2",
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpEqual, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "1 != 2",
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]), 
+                    make(OpCode::OpConstant, vec![1]), 
+                    make(OpCode::OpNotEqual, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "true == false",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpTrue, vec![]), 
+                    make(OpCode::OpFalse, vec![]), 
+                    make(OpCode::OpEqual, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "true != false",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpTrue, vec![]), 
+                    make(OpCode::OpFalse, vec![]), 
+                    make(OpCode::OpNotEqual, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "!true",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpTrue, vec![]), 
+                    make(OpCode::OpBang, vec![]), 
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
         ];
 
         run_compiler_tests(compiler_test_cases);
@@ -194,7 +371,7 @@ mod test {
 
     fn test_instructions(expected: &Vec<Instructions>, actual: &Instructions) {
         let concatted = concat_instructions(expected);
-        assert_eq!(actual.len(), concatted.len());
+        assert_eq!(actual.len(), concatted.len(), "\nactual: {}expected: {}", string(actual), string(&concatted));
 
         for (i, instruction) in concatted.iter().enumerate() {
             assert_eq!(actual[i], *instruction);

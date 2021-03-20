@@ -4,7 +4,18 @@ pub type Instructions = Vec<u8>;
 #[derive(Clone, Debug)]
 pub enum OpCode {
     OpConstant = 1,
-    OpAdd = 2,
+    OpAdd,
+    OpPop,
+    OpSub,
+    OpMul,
+    OpDiv,
+    OpTrue,
+    OpFalse,
+    OpEqual,
+    OpNotEqual,
+    OpGreaterThan,
+    OpMinus,
+    OpBang,
 }
 
 impl From<u8> for OpCode {
@@ -12,6 +23,17 @@ impl From<u8> for OpCode {
         match value {
             1 => OpCode::OpConstant,
             2 => OpCode::OpAdd,
+            3 => OpCode::OpPop,
+            4 => OpCode::OpSub,
+            5 => OpCode::OpMul,
+            6 => OpCode::OpDiv,
+            7 => OpCode::OpTrue,
+            8 => OpCode::OpFalse,
+            9 => OpCode::OpEqual,
+            10 => OpCode::OpNotEqual,
+            11 => OpCode::OpGreaterThan,
+            12 => OpCode::OpMinus,
+            13 => OpCode::OpBang,
             _ => OpCode::OpConstant,
         }
     }
@@ -32,10 +54,21 @@ fn lookup(op: &OpCode) -> Definition {
     match op {
         OpCode::OpConstant => Definition::new("OpConstant", vec![2]),
         OpCode::OpAdd => Definition::new("OpAdd", vec![]),
+        OpCode::OpPop => Definition::new("OpPop", vec![]),
+        OpCode::OpSub => Definition::new("OpSub", vec![]),
+        OpCode::OpMul => Definition::new("OpMul", vec![]),
+        OpCode::OpDiv => Definition::new("OpDiv", vec![]),
+        OpCode::OpTrue => Definition::new("OpTrue", vec![]),
+        OpCode::OpFalse => Definition::new("OpFalse", vec![]),
+        OpCode::OpEqual => Definition::new("OpEqual", vec![]),
+        OpCode::OpNotEqual => Definition::new("OpNotEqual", vec![]),
+        OpCode::OpGreaterThan => Definition::new("OpGreaterThan", vec![]),
+        OpCode::OpMinus => Definition::new("OpMinus", vec![]),
+        OpCode::OpBang => Definition::new("OpBang", vec![]),
     }
 }
 
-fn string(instructions: &Instructions) -> String {
+pub fn string(instructions: &Instructions) -> String {
     let mut out = String::new();
 
     let mut i = 0;

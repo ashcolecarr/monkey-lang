@@ -16,7 +16,6 @@ impl VM {
         Self {
             instructions: bytecode.instructions,
             constants: bytecode.constants,
-            //stack: Vec::with_capacity(STACK_SIZE),
             stack: vec![Object::NonPrint; STACK_SIZE],
             sp: 0,
         }
@@ -40,15 +39,37 @@ impl VM {
                         return Err(e);
                     }
                 },
-                OpCode::OpAdd => {
-                    let right = self.pop();
-                    let left = self.pop();
-
-                    if let (Object::Integer(l), Object::Integer(r)) = (left, right) {
-                        let result = l.value + r.value;
-                        self.push(Object::Integer(Integer::new(result)));
+                OpCode::OpAdd | OpCode::OpSub | OpCode::OpMul | OpCode::OpDiv => {
+                    if let Err(e) = self.execute_binary_operation(&op) {
+                        return Err(e);
                     }
-                }
+                },
+                OpCode::OpPop => { self.pop(); },
+                OpCode::OpTrue => {
+                    if let Err(e) = self.push(Object::Boolean(Boolean::new(true))) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpFalse => {
+                    if let Err(e) = self.push(Object::Boolean(Boolean::new(false))) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpEqual | OpCode::OpNotEqual | OpCode::OpGreaterThan => {
+                    if let Err(e) = self.execute_comparison(&op) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpBang => {
+                    if let Err(e) = self.execute_bang_operator() {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpMinus => {
+                    if let Err(e) = self.execute_minus_operator() {
+                        return Err(e);
+                    }
+                },
                 _ => (),
             };
 
@@ -74,6 +95,94 @@ impl VM {
         self.sp -= 1;
 
         object
+    }
+
+    fn execute_binary_operation(&mut self, op: &OpCode) -> Result<(), String> {
+        let right = self.pop();
+        let left = self.pop();
+
+        match (&left, &right) {
+            (Object::Integer(l), Object::Integer(r)) => self.execute_binary_integer_operation(op, &l, &r),
+            _ => Err(format!("unsupported types for binary operation: {} {}", left.type_of(), right.type_of())),
+        }
+    }
+
+    fn execute_binary_integer_operation(&mut self, op: &OpCode, left: &Integer, right: &Integer) -> Result<(), String> {
+        let left_value = left.value; 
+        let right_value = right.value; 
+
+        let result = match op {
+            OpCode::OpAdd => left_value + right_value,
+            OpCode::OpSub => left_value - right_value,
+            OpCode::OpMul => left_value * right_value,
+            OpCode::OpDiv => left_value / right_value,
+            _ => return Err(format!("unknown integer operator: {:?}", op)),
+        };
+
+        self.push(Object::Integer(Integer::new(result)))
+    }
+
+    fn execute_comparison(&mut self, op: &OpCode) -> Result<(), String> {
+        let right = self.pop();
+        let left = self.pop();
+
+        if let (Object::Integer(l), Object::Integer(r)) = (&left, &right) {
+            return self.execute_integer_comparison(op, &l, &r);
+        } else if let (Object::Boolean(l), Object::Boolean(r)) = (&left, &right) {
+            return match op {
+                OpCode::OpEqual => self.push(self.native_bool_to_boolean_object(r.value == l.value)),
+                OpCode::OpNotEqual => self.push(self.native_bool_to_boolean_object(r.value != l.value)),
+                _ => Err(format!("unknown operator: {:?} ({} {})", op, left.type_of(), right.type_of())),
+            }
+        }
+
+        Err(format!("object types are not supported: {} {}", left.type_of(), right.type_of()))
+    }
+
+    fn execute_integer_comparison(&mut self, op: &OpCode, left: &Integer, right: &Integer) -> Result<(), String> {
+        let left_value = left.value; 
+        let right_value = right.value; 
+
+        match op {
+            OpCode::OpEqual => self.push(self.native_bool_to_boolean_object(right_value == left_value)),
+            OpCode::OpNotEqual => self.push(self.native_bool_to_boolean_object(right_value != left_value)),
+            OpCode::OpGreaterThan => self.push(self.native_bool_to_boolean_object(left_value > right_value)),
+            _ => Err(format!("unknown operator: {:?}", op)),
+        }
+    }
+
+    fn execute_bang_operator(&mut self) -> Result<(), String> {
+        let operand = self.pop();
+
+        match operand {
+            Object::Boolean(b) => {
+                if b.value {
+                    self.push(Object::Boolean(Boolean::new(false)))
+                } else {
+                    self.push(Object::Boolean(Boolean::new(true)))
+                }
+            },
+            _ => self.push(Object::Boolean(Boolean::new(false))),
+        }
+    }
+
+    fn execute_minus_operator(&mut self) -> Result<(), String> {
+        let operand = self.pop();
+
+        match operand {
+            Object::Integer(i) => {
+                self.push(Object::Integer(Integer::new(-i.value)))
+            },
+            _ => Err(format!("unsupported type for negation: {}", operand.type_of())),
+        }
+    }
+
+    fn native_bool_to_boolean_object(&self, input: bool) -> Object {
+        Object::Boolean(Boolean::new(input))
+    }
+
+    pub fn last_popped_stack_element(&self) -> Object {
+        self.stack[self.sp].clone()
     }
 
     pub fn stack_top(&self) -> Option<Object> {
@@ -131,6 +240,52 @@ mod test {
             VMTestCase { input: "1", expected: 1 },
             VMTestCase { input: "2", expected: 2 },
             VMTestCase { input: "1 + 2", expected: 3 },
+            VMTestCase { input: "1 - 2", expected: -1 },
+            VMTestCase { input: "1 * 2", expected: 2 },
+            VMTestCase { input: "4 / 2", expected: 2 },
+            VMTestCase { input: "50 / 2 * 2 + 10 - 5", expected: 55 },
+            VMTestCase { input: "5 + 5 + 5 + 5 - 10", expected: 10 },
+            VMTestCase { input: "2 * 2 * 2 * 2 * 2", expected: 32 },
+            VMTestCase { input: "5 * 2 + 10", expected: 20 },
+            VMTestCase { input: "5 + 2 * 10", expected: 25 },
+            VMTestCase { input: "5 * (2 + 10)", expected: 60 },
+            VMTestCase { input: "-5", expected: -5 },
+            VMTestCase { input: "-10", expected: -10 },
+            VMTestCase { input: "-50 + 100 + -50", expected: 0 },
+            VMTestCase { input: "(5 + 10 * 2 + 15 / 3) * 2 + -10", expected: 50 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_boolean_expressions() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "true", expected: true },
+            VMTestCase { input: "false", expected: false },
+            VMTestCase { input: "1 < 2", expected: true },
+            VMTestCase { input: "1 > 2", expected: false },
+            VMTestCase { input: "1 < 1", expected: false },
+            VMTestCase { input: "1 > 1", expected: false },
+            VMTestCase { input: "1 == 1", expected: true },
+            VMTestCase { input: "1 != 1", expected: false },
+            VMTestCase { input: "1 == 2", expected: false },
+            VMTestCase { input: "1 != 2", expected: true },
+            VMTestCase { input: "true == true", expected: true },
+            VMTestCase { input: "false == false", expected: true },
+            VMTestCase { input: "true == false", expected: false },
+            VMTestCase { input: "true != false", expected: true },
+            VMTestCase { input: "false != true", expected: true },
+            VMTestCase { input: "(1 < 2) == true", expected: true },
+            VMTestCase { input: "(1 < 2) == false", expected: false },
+            VMTestCase { input: "(1 > 2) == true", expected: false },
+            VMTestCase { input: "(1 > 2) == false", expected: true },
+            VMTestCase { input: "!true", expected: false },
+            VMTestCase { input: "!false", expected: true },
+            VMTestCase { input: "!5", expected: false },
+            VMTestCase { input: "!!true", expected: true },
+            VMTestCase { input: "!!false", expected: false },
+            VMTestCase { input: "!!5", expected: true },
         ];
 
         run_vm_tests(vm_test_cases);
@@ -149,12 +304,9 @@ mod test {
                 assert!(false, format!("vm error: {}", e));
             }
 
-            let stack_element = vm.stack_top();
+            let stack_element = vm.last_popped_stack_element();
 
-            match stack_element {
-                Some(se) => test_expected_object(&test.expected, &se),
-                None => assert!(false, "No items were found on the stack."),
-            }
+            test_expected_object(&test.expected, &stack_element);
         }
     }
 
@@ -171,6 +323,7 @@ mod test {
     fn test_expected_object<T>(expected: &T, actual: &Object) where T: ValueType {
         match expected.get_type() {
             "i64" => test_integer_object(expected.get_i64(), actual),
+            "bool" => test_boolean_object(expected.get_bool(), actual),
             _ => assert!(false, "Object type is not supported."),
         }
     }
@@ -179,6 +332,13 @@ mod test {
         match actual {
             Object::Integer(i) => assert_eq!(i.value, expected),
             _ => assert!(false, "Object was not an Integer."),
+        }
+    }
+
+    fn test_boolean_object(expected: bool, actual: &Object) {
+        match actual {
+            Object::Boolean(b) => assert_eq!(b.value, expected),
+            _ => assert!(false, "Object was not a Boolean."),
         }
     }
 }
