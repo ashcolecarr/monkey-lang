@@ -70,6 +70,32 @@ impl VM {
                         return Err(e);
                     }
                 },
+                OpCode::OpJump => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.instructions[ip + 1];
+                    bytes[1] = self.instructions[ip + 2];
+
+                    let position = read_u16(&bytes);
+                    ip = position as usize - 1;
+                },
+                OpCode::OpJumpNotTruthy => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.instructions[ip + 1];
+                    bytes[1] = self.instructions[ip + 2];
+
+                    let position = read_u16(&bytes);
+                    ip += 2;
+
+                    let condition = self.pop();
+                    if !self.is_truthy(condition) {
+                        ip = position as usize - 1;
+                    }
+                },
+                OpCode::OpNull => {
+                    if let Err(e) = self.push(Object::Null(Null::new())) {
+                        return Err(e);
+                    }
+                },
                 _ => (),
             };
 
@@ -162,6 +188,7 @@ impl VM {
                     self.push(Object::Boolean(Boolean::new(true)))
                 }
             },
+            Object::Null(_) => self.push(Object::Boolean(Boolean::new(true))),
             _ => self.push(Object::Boolean(Boolean::new(false))),
         }
     }
@@ -181,15 +208,16 @@ impl VM {
         Object::Boolean(Boolean::new(input))
     }
 
-    pub fn last_popped_stack_element(&self) -> Object {
-        self.stack[self.sp].clone()
+    fn is_truthy(&self, object: Object) -> bool {
+        match object {
+            Object::Boolean(b) => b.value,
+            Object::Null(_) => false,
+            _ => true,
+        }
     }
 
-    pub fn stack_top(&self) -> Option<Object> {
-        match self.sp {
-            0 => None,
-            _ => Some(self.stack[self.sp - 1].clone()),
-        }
+    pub fn last_popped_stack_element(&self) -> Object {
+        self.stack[self.sp].clone()
     }
 }
 
@@ -206,6 +234,7 @@ mod test {
         fn get_i64(&self) -> i64;
         fn get_string(&self) -> String;
         fn get_bool(&self) -> bool;
+        fn get_null(&self) -> Option<i8>;
     }
 
     impl ValueType for i64 {
@@ -213,6 +242,7 @@ mod test {
         fn get_i64(&self) -> i64 { *self }
         fn get_string(&self) -> String { panic!("Value is not an i64.") }
         fn get_bool(&self) -> bool { panic!("Value is not an i64.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not null.") }
     }
 
     impl ValueType for String {
@@ -220,6 +250,7 @@ mod test {
         fn get_i64(&self) -> i64 { panic!("Value is not a String.") }
         fn get_string(&self) -> String { self.clone() }
         fn get_bool(&self) -> bool { panic!("Value is not a String.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not null.") }
     }
 
     impl ValueType for bool {
@@ -227,6 +258,15 @@ mod test {
         fn get_i64(&self) -> i64 { panic!("Value is not a bool.") }
         fn get_string(&self) -> String { panic!("Value is not a bool.") }
         fn get_bool(&self) -> bool { *self }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not null.") }
+    }
+
+    impl ValueType for Option<i64> {
+        fn get_type(&self) -> &str { "null" }
+        fn get_i64(&self) -> i64 { panic!("Value is not null.") }
+        fn get_string(&self) -> String { panic!("Value is not null.") }
+        fn get_bool(&self) -> bool { panic!("Value is not null.") }
+        fn get_null(&self) -> Option<i8> { None }
     }
 
     struct VMTestCase<'a, T> where T: ValueType {
@@ -286,9 +326,32 @@ mod test {
             VMTestCase { input: "!!true", expected: true },
             VMTestCase { input: "!!false", expected: false },
             VMTestCase { input: "!!5", expected: true },
+            VMTestCase { input: "!(if (false) { 5; })", expected: true },
         ];
 
         run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_conditionals() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "if (true) { 10 }", expected: 10 },
+            VMTestCase { input: "if (true) { 10 } else { 20 }", expected: 10 },
+            VMTestCase { input: "if (false) { 10 } else { 20 }", expected: 20 },
+            VMTestCase { input: "if (1) { 10 }", expected: 10 },
+            VMTestCase { input: "if (1 < 2) { 10 }", expected: 10 },
+            VMTestCase { input: "if (1 < 2) { 10 } else { 20 }", expected: 10 },
+            VMTestCase { input: "if (1 > 2) { 10 } else { 20 }", expected: 20 },
+            VMTestCase { input: "if ((if (false) { 10 })) { 10 } else { 20 }", expected: 20 },
+        ];
+
+        let vm_test_cases_2 = vec![
+            VMTestCase { input: "if (1 > 2) { 10 }", expected: None },
+            VMTestCase { input: "if (false) { 10 }", expected: None },
+        ];
+
+        run_vm_tests(vm_test_cases);
+        run_vm_tests(vm_test_cases_2);
     }
 
     fn run_vm_tests<T>(tests: Vec<VMTestCase<T>>) where T: ValueType {
@@ -324,6 +387,12 @@ mod test {
         match expected.get_type() {
             "i64" => test_integer_object(expected.get_i64(), actual),
             "bool" => test_boolean_object(expected.get_bool(), actual),
+            "null" => {
+                match actual {
+                    Object::Null(_) => (),
+                    _ => assert!(false, "Object was not Null."),
+                }
+            },
             _ => assert!(false, "Object type is not supported."),
         }
     }

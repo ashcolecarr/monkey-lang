@@ -1,7 +1,7 @@
 pub type Instructions = Vec<u8>;
 
 #[repr(u8)]
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum OpCode {
     OpConstant = 1,
     OpAdd,
@@ -16,6 +16,9 @@ pub enum OpCode {
     OpGreaterThan,
     OpMinus,
     OpBang,
+    OpJumpNotTruthy,
+    OpJump,
+    OpNull,
 }
 
 impl From<u8> for OpCode {
@@ -34,7 +37,10 @@ impl From<u8> for OpCode {
             11 => OpCode::OpGreaterThan,
             12 => OpCode::OpMinus,
             13 => OpCode::OpBang,
-            _ => OpCode::OpConstant,
+            14 => OpCode::OpJumpNotTruthy,
+            15 => OpCode::OpJump,
+            16 => OpCode::OpNull,
+            _ => OpCode::OpNull,
         }
     }
 }
@@ -65,6 +71,9 @@ fn lookup(op: &OpCode) -> Definition {
         OpCode::OpGreaterThan => Definition::new("OpGreaterThan", vec![]),
         OpCode::OpMinus => Definition::new("OpMinus", vec![]),
         OpCode::OpBang => Definition::new("OpBang", vec![]),
+        OpCode::OpJumpNotTruthy => Definition::new("OpJumpNotTruthy", vec![2]),
+        OpCode::OpJump => Definition::new("OpJump", vec![2]),
+        OpCode::OpNull => Definition::new("OpNull", vec![]),
     }
 }
 
