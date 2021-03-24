@@ -19,6 +19,8 @@ pub enum OpCode {
     OpJumpNotTruthy,
     OpJump,
     OpNull,
+    OpGetGlobal,
+    OpSetGlobal,
 }
 
 impl From<u8> for OpCode {
@@ -40,6 +42,8 @@ impl From<u8> for OpCode {
             14 => OpCode::OpJumpNotTruthy,
             15 => OpCode::OpJump,
             16 => OpCode::OpNull,
+            17 => OpCode::OpGetGlobal,
+            18 => OpCode::OpSetGlobal,
             _ => OpCode::OpNull,
         }
     }
@@ -74,6 +78,8 @@ fn lookup(op: &OpCode) -> Definition {
         OpCode::OpJumpNotTruthy => Definition::new("OpJumpNotTruthy", vec![2]),
         OpCode::OpJump => Definition::new("OpJump", vec![2]),
         OpCode::OpNull => Definition::new("OpNull", vec![]),
+        OpCode::OpGetGlobal => Definition::new("OpGetGlobal", vec![2]),
+        OpCode::OpSetGlobal => Definition::new("OpSetGlobal", vec![2]),
     }
 }
 

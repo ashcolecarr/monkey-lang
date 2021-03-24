@@ -1,6 +1,9 @@
 use super::code::*;
 use super::compiler::Bytecode;
+use super::GLOBALS_SIZE;
 use super::object::*;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 const STACK_SIZE: usize = 2048;
 
@@ -9,6 +12,7 @@ pub struct VM {
     instructions: Instructions,
     stack: Vec<Object>,
     sp: usize, // Always points to the next value; top of stack is sp - 1
+    globals: Rc<RefCell<Vec<Object>>>,
 }
 
 impl VM {
@@ -18,7 +22,15 @@ impl VM {
             constants: bytecode.constants,
             stack: vec![Object::NonPrint; STACK_SIZE],
             sp: 0,
+            globals: Rc::new(RefCell::new(vec![Object::NonPrint; GLOBALS_SIZE])),
         }
+    }
+
+    pub fn new_with_globals_store(bytecode: Bytecode, store: Rc<RefCell<Vec<Object>>>) -> Self {
+        let mut vm = Self::new(bytecode);
+        vm.globals = store;
+
+        vm
     }
     
     pub fn run(&mut self) -> Result<(), String> {
@@ -93,6 +105,29 @@ impl VM {
                 },
                 OpCode::OpNull => {
                     if let Err(e) = self.push(Object::Null(Null::new())) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpSetGlobal => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.instructions[ip + 1];
+                    bytes[1] = self.instructions[ip + 2];
+
+                    let global_index = read_u16(&bytes);
+                    ip += 2;
+
+                    self.globals.borrow_mut()[global_index as usize] = self.pop();
+                },
+                OpCode::OpGetGlobal => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.instructions[ip + 1];
+                    bytes[1] = self.instructions[ip + 2];
+
+                    let global_index = read_u16(&bytes);
+                    ip += 2;
+
+                    let value = self.globals.borrow()[global_index as usize].clone();
+                    if let Err(e) = self.push(value) {
                         return Err(e);
                     }
                 },
@@ -343,6 +378,23 @@ mod test {
             VMTestCase { input: "if (1 < 2) { 10 } else { 20 }", expected: 10 },
             VMTestCase { input: "if (1 > 2) { 10 } else { 20 }", expected: 20 },
             VMTestCase { input: "if ((if (false) { 10 })) { 10 } else { 20 }", expected: 20 },
+        ];
+
+        let vm_test_cases_2 = vec![
+            VMTestCase { input: "if (1 > 2) { 10 }", expected: None },
+            VMTestCase { input: "if (false) { 10 }", expected: None },
+        ];
+
+        run_vm_tests(vm_test_cases);
+        run_vm_tests(vm_test_cases_2);
+    }
+
+    #[test]
+    fn test_global_let_statements() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "let one = 1; one", expected: 1 },
+            VMTestCase { input: "let one = 1; let two = 2; one + two", expected: 3 },
+            VMTestCase { input: "let one = 1; let two = one + one; one + two", expected: 3 },
         ];
 
         let vm_test_cases_2 = vec![

@@ -1,20 +1,23 @@
 use super::ast::Node;
 use super::compiler::Compiler;
-//use super::environment::Environment;
-//use super::evaluator::eval;
+use super::GLOBALS_SIZE;
 use super::lexer::Lexer;
 use super::MONKEY_FACE;
-//use super::object::Object;
+use super::object::*;
 use super::parser::Parser;
 use super::PROMPT;
+use super::symbol_table::SymbolTable;
 use super::vm::VM;
-//use std::cell::RefCell;
+use std::cell::RefCell;
 use std::io::{stdin, stdout, Write};
-//use std::rc::Rc;
+use std::rc::Rc;
 
 pub fn start() {
     let mut line = String::new();
-    //let env = Rc::new(RefCell::new(Environment::new(true)));
+
+    let constants: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(vec![]));
+    let globals: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(vec![Object::NonPrint; GLOBALS_SIZE]));
+    let symbol_table = Rc::new(RefCell::new(SymbolTable::new()));
 
     loop {
         print!("{}", PROMPT);
@@ -38,19 +41,16 @@ pub fn start() {
                 }
 
                 if let Some(p) = program {
-                    //let evaluated = eval(&Node::Program(p), Rc::clone(&env));
-                    //if let Object::NonPrint = evaluated {
-                    //    continue;
-                    //}
-                    //println!("{}", evaluated);
-                    let mut compiler = Compiler::new();
+                    let mut compiler = Compiler::new_with_state(Rc::clone(&symbol_table), Rc::clone(&constants));
                     if let Err(e) = compiler.compile(&Node::Program(p)) {
                         eprintln!("Compilation failed:\n {}", e);
                         line.clear();
                         continue;
                     }
 
-                    let mut machine = VM::new(compiler.bytecode());
+                    let code = compiler.bytecode();
+                    *constants.borrow_mut() = code.constants.clone();
+                    let mut machine = VM::new_with_globals_store(code, Rc::clone(&globals));
                     if let Err(e) = machine.run() {
                         eprintln!("Executing bytecode failed:\n {}", e);
                         line.clear();

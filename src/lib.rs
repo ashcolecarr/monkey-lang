@@ -8,9 +8,11 @@ pub mod lexer;
 pub mod object;
 pub mod parser;
 pub mod repl;
+pub mod symbol_table;
 pub mod token;
 pub mod vm;
 
+pub const GLOBALS_SIZE: usize = 65536;
 pub const PROMPT: &str = ">> ";
 pub const MONKEY_FACE: &str = r#"           __,__
   .--.  .-"     "-.  .--.

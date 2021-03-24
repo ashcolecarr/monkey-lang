@@ -1,6 +1,9 @@
 use super::ast::*;
 use super::code::*;
 use super::object::*;
+use super::symbol_table::SymbolTable;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 pub struct Bytecode {
     pub instructions: Instructions,
@@ -27,19 +30,29 @@ impl EmittedInstruction {
 
 pub struct Compiler {
     pub instructions: Instructions,
-    pub constants: Vec<Object>,
+    pub constants: Rc<RefCell<Vec<Object>>>,
     pub last_instruction: EmittedInstruction,
     pub previous_instruction: EmittedInstruction,
+    pub symbol_table: Rc<RefCell<SymbolTable>>,
 }
 
 impl Compiler {
     pub fn new() -> Self {
         Self {
             instructions: vec![],
-            constants: vec![],
+            constants: Rc::new(RefCell::new(vec![])),
             last_instruction: EmittedInstruction::new(OpCode::OpConstant, 0),
             previous_instruction: EmittedInstruction::new(OpCode::OpConstant, 0),
+            symbol_table: Rc::new(RefCell::new(SymbolTable::new())),
         }
+    }
+
+    pub fn new_with_state(symbol_table: Rc<RefCell<SymbolTable>>, constants: Rc<RefCell<Vec<Object>>>) -> Self {
+        let mut compiler = Self::new();
+        compiler.symbol_table = symbol_table;
+        compiler.constants = constants;
+
+        compiler
     }
 
     pub fn compile(&mut self, node: &Node) -> Result<(), String> {
@@ -67,6 +80,16 @@ impl Compiler {
                             if let Err(e) = self.compile(&Node::Statement(s.clone())) {
                                 return Err(e);
                             }
+                        }
+                    },
+                    Statement::LetStatement(ls) => {
+                        if let Some(val) = &ls.value {
+                            if let Err(e) = self.compile(&Node::Expression(val.clone())) {
+                                return Err(e);
+                            }
+
+                            let symbol = self.symbol_table.borrow_mut().define(ls.name.value.as_str());
+                            self.emit(OpCode::OpSetGlobal, vec![symbol.index as i64]);
                         }
                     },
                     _ => (),
@@ -172,6 +195,13 @@ impl Compiler {
                         let after_alternative_position = self.instructions.len();
                         self.change_operand(jump_position, after_alternative_position as i64);
                     },
+                    Expression::Identifier(id) => {
+                        let symbol = self.symbol_table.borrow().resolve(id.value.as_str());
+                        match symbol {
+                            Some(sym) => self.emit(OpCode::OpGetGlobal, vec![sym.index as i64]),
+                            None => return Err(format!("undefined variable {}", id.value)),
+                        };
+                    },
                     _ => (),
                 }
             }
@@ -181,13 +211,13 @@ impl Compiler {
     }
 
     pub fn bytecode(&self) -> Bytecode {
-        Bytecode::new(self.instructions.clone(), self.constants.clone())
+        Bytecode::new(self.instructions.clone(), self.constants.borrow().clone())
     }
 
     fn add_constant(&mut self, object: Object) -> usize {
-        self.constants.push(object);
+        self.constants.borrow_mut().push(object);
 
-        self.constants.len() - 1
+        self.constants.borrow().len() - 1
     }
 
     fn emit(&mut self, op: OpCode, operands: Vec<i64>) -> usize {
@@ -465,6 +495,56 @@ mod test {
                     make(OpCode::OpConstant, vec![1]),
                     make(OpCode::OpPop, vec![]),
                     make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiler_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_global_let_statements() {
+        let compiler_test_cases = vec![
+            CompilerTestCase {
+                input: r#"
+let one = 1;
+let two = 2;
+"#,
+                expected_constants: vec![1, 2],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpSetGlobal, vec![1]),
+                ]
+            },
+            CompilerTestCase {
+                input: r#"
+let one = 1;
+one;
+"#,
+                expected_constants: vec![1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpGetGlobal, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: r#"
+let one = 1;
+let two = one;
+two;
+"#,
+                expected_constants: vec![1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpGetGlobal, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![1]),
+                    make(OpCode::OpGetGlobal, vec![1]),
                     make(OpCode::OpPop, vec![]),
                 ]
             },
