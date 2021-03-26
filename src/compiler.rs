@@ -202,6 +202,51 @@ impl Compiler {
                             None => return Err(format!("undefined variable {}", id.value)),
                         };
                     },
+                    Expression::StringLiteral(sl) => {
+                        let string_object = Object::String(StringObject::new(sl.value.as_str()));
+
+                        let position = self.add_constant(string_object) as i64;
+                        self.emit(OpCode::OpConstant, vec![position]);
+                    },
+                    Expression::ArrayLiteral(al) => {
+                        for element in &al.elements {
+                            if let Err(e) = self.compile(&Node::Expression(element.clone())) {
+                                return Err(e);
+                            }
+                        }
+
+                        self.emit(OpCode::OpArray, vec![al.elements.len() as i64]);
+                    },
+                    Expression::HashLiteral(hl) => {
+                        let mut keys = vec![];
+                        for (key, _) in &hl.pairs {
+                            keys.push(key);
+                        }
+
+                        keys.sort_by(|a, b| format!("{}", *a).cmp(&format!("{}", b)));
+                        for key in keys {
+                            if let Err(e) = self.compile(&Node::Expression(key.clone())) {
+                                return Err(e);
+                            }
+
+                            if let Err(e) = self.compile(&Node::Expression(hl.pairs[key].clone())) {
+                                return Err(e);
+                            }
+                        }
+
+                        self.emit(OpCode::OpHash, vec![(hl.pairs.len() * 2) as i64]);
+                    },
+                    Expression::IndexExpression(ie) => {
+                        if let Err(e) = self.compile(&Node::Expression(*ie.left.clone())) {
+                            return Err(e);
+                        }
+
+                        if let Err(e) = self.compile(&Node::Expression(*ie.index.clone())) {
+                            return Err(e);
+                        }
+
+                        self.emit(OpCode::OpIndex, vec![]);
+                    },
                     _ => (),
                 }
             }
@@ -553,6 +598,159 @@ two;
         run_compiler_tests(compiler_test_cases);
     }
 
+    #[test]
+    fn test_string_expressions() {
+        let compiler_test_cases = vec![
+            CompilerTestCase {
+                input: "\"monkey\"",
+                expected_constants: vec![String::from("monkey")],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "\"mon\" + \"key\"",
+                expected_constants: vec![String::from("mon"), String::from("key")],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpAdd, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiler_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_array_literals() {
+        let compiler_test_cases = vec![
+            CompilerTestCase {
+                input: "[]",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpArray, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "[1, 2, 3]",
+                expected_constants: vec![1, 2, 3],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpArray, vec![3]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "[1 + 2, 3 - 4, 5 * 6]",
+                expected_constants: vec![1, 2, 3, 4, 5, 6],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpAdd, vec![]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpConstant, vec![3]),
+                    make(OpCode::OpSub, vec![]),
+                    make(OpCode::OpConstant, vec![4]),
+                    make(OpCode::OpConstant, vec![5]),
+                    make(OpCode::OpMul, vec![]),
+                    make(OpCode::OpArray, vec![3]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiler_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_hash_literals() {
+        let compiler_test_cases = vec![
+            CompilerTestCase {
+                input: "{}",
+                expected_constants: vec![],
+                expected_instructions: vec![
+                    make(OpCode::OpHash, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "{1: 2, 3: 4, 5: 6}",
+                expected_constants: vec![1, 2, 3, 4, 5, 6],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpConstant, vec![3]),
+                    make(OpCode::OpConstant, vec![4]),
+                    make(OpCode::OpConstant, vec![5]),
+                    make(OpCode::OpHash, vec![6]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "{1: 2 + 3, 4: 5 * 6}",
+                expected_constants: vec![1, 2, 3, 4, 5, 6],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpAdd, vec![]),
+                    make(OpCode::OpConstant, vec![3]),
+                    make(OpCode::OpConstant, vec![4]),
+                    make(OpCode::OpConstant, vec![5]),
+                    make(OpCode::OpMul, vec![]),
+                    make(OpCode::OpHash, vec![4]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiler_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_index_expressions() {
+        let compiler_test_cases = vec![
+            CompilerTestCase {
+                input: "[1, 2, 3][1 + 1]",
+                expected_constants: vec![1, 2, 3, 1, 1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpArray, vec![3]),
+                    make(OpCode::OpConstant, vec![3]),
+                    make(OpCode::OpConstant, vec![4]),
+                    make(OpCode::OpAdd, vec![]),
+                    make(OpCode::OpIndex, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompilerTestCase {
+                input: "{1: 2}[2 - 1]",
+                expected_constants: vec![1, 2, 2, 1],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpHash, vec![2]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpConstant, vec![3]),
+                    make(OpCode::OpSub, vec![]),
+                    make(OpCode::OpIndex, vec![]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiler_tests(compiler_test_cases);
+    }
+
     fn run_compiler_tests<T>(tests: Vec<CompilerTestCase<T>>) where T: ValueType {
         for test in tests {
             let program = parse(test.input);
@@ -605,6 +803,7 @@ two;
         for (i, constant) in expected.iter().enumerate() {
             match constant.get_type() {
                 "i64" => test_integer_object(constant.get_i64(), &actual[i]),
+                "String" => test_string_object(constant.get_string(), &actual[i]),
                 _ => assert!(false, "Constant type is not supported."),
             };
         }
@@ -614,6 +813,13 @@ two;
         match actual {
             Object::Integer(i) => assert_eq!(i.value, expected),
             _ => assert!(false, "Object was not an Integer."),
+        }
+    }
+
+    fn test_string_object(expected: String, actual: &Object) {
+        match actual {
+            Object::String(s) => assert_eq!(s.value, expected),
+            _ => assert!(false, "Object was not a String."),
         }
     }
 }

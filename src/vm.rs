@@ -3,6 +3,7 @@ use super::compiler::Bytecode;
 use super::GLOBALS_SIZE;
 use super::object::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
 const STACK_SIZE: usize = 2048;
@@ -131,6 +132,48 @@ impl VM {
                         return Err(e);
                     }
                 },
+                OpCode::OpArray => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.instructions[ip + 1];
+                    bytes[1] = self.instructions[ip + 2];
+
+                    let num_elements = read_u16(&bytes);
+                    ip += 2;
+
+                    let array = self.build_array(self.sp - num_elements as usize, self.sp);
+                    self.sp -= num_elements as usize;
+
+                    if let Err(e) = self.push(array) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpHash => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.instructions[ip + 1];
+                    bytes[1] = self.instructions[ip + 2];
+
+                    let num_elements = read_u16(&bytes);
+                    ip += 2;
+
+                    match self.build_hash(self.sp - num_elements as usize, self.sp) {
+                        Ok(hash) => {
+                            self.sp -= num_elements as usize;
+
+                            if let Err(e) = self.push(hash) {
+                                return Err(e);
+                            }
+                        },
+                        Err(e) => return Err(e),
+                    }
+                },
+                OpCode::OpIndex => {
+                    let index = self.pop();
+                    let left = self.pop();
+
+                    if let Err(e) = self.execute_index_expression(&left, &index) {
+                        return Err(e);
+                    }
+                },
                 _ => (),
             };
 
@@ -164,6 +207,7 @@ impl VM {
 
         match (&left, &right) {
             (Object::Integer(l), Object::Integer(r)) => self.execute_binary_integer_operation(op, &l, &r),
+            (Object::String(l), Object::String(r)) => self.execute_binary_string_operation(op, &l, &r),
             _ => Err(format!("unsupported types for binary operation: {} {}", left.type_of(), right.type_of())),
         }
     }
@@ -181,6 +225,18 @@ impl VM {
         };
 
         self.push(Object::Integer(Integer::new(result)))
+    }
+
+    fn execute_binary_string_operation(&mut self, op: &OpCode, left: &StringObject, right: &StringObject) -> Result<(), String> {
+        let left_value = left.value.clone(); 
+        let right_value = right.value.clone(); 
+
+        let result = match op {
+            OpCode::OpAdd => left_value + right_value.as_str(),
+            _ => return Err(format!("unknown integer operator: {:?}", op)),
+        };
+
+        self.push(Object::String(StringObject::new(result.as_str())))
     }
 
     fn execute_comparison(&mut self, op: &OpCode) -> Result<(), String> {
@@ -239,6 +295,66 @@ impl VM {
         }
     }
 
+    fn build_array(&self, start_index: usize, end_index: usize) -> Object {
+        let mut elements = vec![Object::NonPrint; end_index - start_index];
+
+        for i in start_index..end_index {
+            elements[i - start_index] = self.stack[i].clone();
+        }
+
+        Object::Array(Array::new(elements))
+    }
+
+    fn build_hash(&self, start_index: usize, end_index: usize) -> Result<Object, String> {
+        let mut hashed_pairs: HashMap<Object, Object> = HashMap::new();
+
+        for i in (start_index..end_index).step_by(2) {
+            let key = self.stack[i].clone();
+            let value = self.stack[i + 1].clone();
+
+            if !key.is_hashable() {
+                return Err(format!("unusable as hash key: {}", key.type_of()));
+            }
+
+            hashed_pairs.insert(key, value);
+        }
+
+        Ok(Object::Hash(HashObject::new(hashed_pairs)))
+    }
+
+    fn execute_index_expression(&mut self, left: &Object, index: &Object) -> Result<(), String> {
+        if let (Object::Array(l), Object::Integer(i)) = (left, index) {
+            return self.execute_array_index(&l, &i);
+        } else if let Object::Hash(l) = left {
+            return self.execute_hash_index(&l, &index)
+        }
+
+        Err(format!("index operator not supported: {}", left.type_of()))
+    }
+
+    fn execute_array_index(&mut self, array: &Array, index: &Integer) -> Result<(), String> {
+        let i = index.value;
+        let max = array.elements.len() as i64 - 1;
+
+        if i < 0 || i > max {
+            self.push(Object::Null(Null::new()))
+        } else {
+            self.push(array.elements[i as usize].clone())
+        }
+    }
+
+    fn execute_hash_index(&mut self, hash: &HashObject, index: &Object) -> Result<(), String> {
+        let key = index.clone();
+        if !key.is_hashable() {
+            return Err(format!("unusable as hash key: {}", key.type_of()));
+        }
+
+        match hash.pairs.get(&key) {
+            Some(p) => self.push(p.clone()),
+            None => self.push(Object::Null(Null::new())),
+        }
+    }
+
     fn native_bool_to_boolean_object(&self, input: bool) -> Object {
         Object::Boolean(Boolean::new(input))
     }
@@ -270,6 +386,8 @@ mod test {
         fn get_string(&self) -> String;
         fn get_bool(&self) -> bool;
         fn get_null(&self) -> Option<i8>;
+        fn get_array(&self) -> Vec<i64>;
+        fn get_hash(&self) -> Vec<(Integer, i64)>;
     }
 
     impl ValueType for i64 {
@@ -277,7 +395,9 @@ mod test {
         fn get_i64(&self) -> i64 { *self }
         fn get_string(&self) -> String { panic!("Value is not an i64.") }
         fn get_bool(&self) -> bool { panic!("Value is not an i64.") }
-        fn get_null(&self) -> Option<i8> { panic!("Value is not null.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not an i64.") }
+        fn get_array(&self) -> Vec<i64> { panic!("Value is not an i64.") }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not an i64.") }
     }
 
     impl ValueType for String {
@@ -285,7 +405,9 @@ mod test {
         fn get_i64(&self) -> i64 { panic!("Value is not a String.") }
         fn get_string(&self) -> String { self.clone() }
         fn get_bool(&self) -> bool { panic!("Value is not a String.") }
-        fn get_null(&self) -> Option<i8> { panic!("Value is not null.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not a String.") }
+        fn get_array(&self) -> Vec<i64> { panic!("Value is not a String.") }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not a String.") }
     }
 
     impl ValueType for bool {
@@ -293,15 +415,39 @@ mod test {
         fn get_i64(&self) -> i64 { panic!("Value is not a bool.") }
         fn get_string(&self) -> String { panic!("Value is not a bool.") }
         fn get_bool(&self) -> bool { *self }
-        fn get_null(&self) -> Option<i8> { panic!("Value is not null.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not a bool.") }
+        fn get_array(&self) -> Vec<i64> { panic!("Value is not a bool.") }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not a bool.") }
     }
 
-    impl ValueType for Option<i64> {
+    impl ValueType for Option<i8> {
         fn get_type(&self) -> &str { "null" }
         fn get_i64(&self) -> i64 { panic!("Value is not null.") }
         fn get_string(&self) -> String { panic!("Value is not null.") }
         fn get_bool(&self) -> bool { panic!("Value is not null.") }
         fn get_null(&self) -> Option<i8> { None }
+        fn get_array(&self) -> Vec<i64> { panic!("Value is not null.") }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not null.") }
+    }
+
+    impl ValueType for Vec<i64> {
+        fn get_type(&self) -> &str { "Vec" }
+        fn get_i64(&self) -> i64 { panic!("Value is not an array.") }
+        fn get_string(&self) -> String { panic!("Value is not an array.") }
+        fn get_bool(&self) -> bool { panic!("Value is not an array.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not an array.") }
+        fn get_array(&self) -> Vec<i64> { self.clone() }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not an array.") }
+    }
+
+    impl ValueType for Vec<(Integer, i64)> {
+        fn get_type(&self) -> &str { "Hash" }
+        fn get_i64(&self) -> i64 { panic!("Value is not a hash.") }
+        fn get_string(&self) -> String { panic!("Value is not a hash.") }
+        fn get_bool(&self) -> bool { panic!("Value is not a hash.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not a hash.") }
+        fn get_array(&self) -> Vec<i64> { panic!("Value is not a hash.") }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { self.clone() }
     }
 
     struct VMTestCase<'a, T> where T: ValueType {
@@ -406,6 +552,60 @@ mod test {
         run_vm_tests(vm_test_cases_2);
     }
 
+    #[test]
+    fn test_string_expressions() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "\"monkey\"", expected: String::from("monkey") },
+            VMTestCase { input: "\"mon\" + \"key\"", expected: String::from("monkey") },
+            VMTestCase { input: "\"mon\" + \"key\" + \"banana\"", expected: String::from("monkeybanana") },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_array_literals() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "[]", expected: vec![] },
+            VMTestCase { input: "[1, 2, 3]", expected: vec![1, 2, 3] },
+            VMTestCase { input: "[1 + 2, 3 * 4, 5 + 6]", expected: vec![3, 12, 11] },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_hash_literals() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "{}", expected: vec![] },
+            VMTestCase { input: "{1: 2, 2: 3}", expected: vec![(Integer::new(1), 2), (Integer::new(2), 3)] },
+            VMTestCase { input: "{1 + 1: 2 * 2, 3 + 3: 4 * 4}", expected: vec![(Integer::new(2), 4), (Integer::new(6), 16)] },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_index_expressions() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "[1, 2, 3][1]", expected: 2 },
+            VMTestCase { input: "[1, 2, 3][0 + 2]", expected: 3 },
+            VMTestCase { input: "[[1, 1, 1]][0][0]", expected: 1 },
+            VMTestCase { input: "{1: 1, 2: 2}[1]", expected: 1 },
+            VMTestCase { input: "{1: 1, 2: 2}[2]", expected: 2 },
+        ];
+        let vm_test_cases_2 = vec![
+            VMTestCase { input: "[][0]", expected: None },
+            VMTestCase { input: "[1, 2, 3][99]", expected: None },
+            VMTestCase { input: "[1][-1]", expected: None },
+            VMTestCase { input: "{1: 1}[0]", expected: None },
+            VMTestCase { input: "{}[0]", expected: None },
+        ];
+
+        run_vm_tests(vm_test_cases);
+        run_vm_tests(vm_test_cases_2);
+    }
+
     fn run_vm_tests<T>(tests: Vec<VMTestCase<T>>) where T: ValueType {
         for test in tests {
             let program = parse(test.input);
@@ -439,11 +639,37 @@ mod test {
         match expected.get_type() {
             "i64" => test_integer_object(expected.get_i64(), actual),
             "bool" => test_boolean_object(expected.get_bool(), actual),
+            "String" => test_string_object(expected.get_string(), actual),
             "null" => {
                 match actual {
                     Object::Null(_) => (),
                     _ => assert!(false, "Object was not Null."),
                 }
+            },
+            "Vec" => {
+                match actual {
+                    Object::Array(arr) => {
+                        assert_eq!(arr.elements.len(), expected.get_array().len());
+                        for (i, expected_element) in expected.get_array().iter().enumerate() {
+                            test_integer_object(*expected_element, &arr.elements[i]);
+                        }
+                    },
+                    _ => assert!(false, "Object was not an Array."),
+                }
+            },
+            "Hash" => {
+                match actual {
+                    Object::Hash(h) => {
+                        assert_eq!(h.pairs.len(), expected.get_hash().len());
+                        for (expected_key, expected_value) in expected.get_hash() {
+                            match h.pairs.get(&Object::Integer(expected_key)) {
+                                Some(p) => test_integer_object(expected_value, &p),
+                                None => assert!(false, "Key was not present in Hash."),
+                            };
+                        }
+                    },
+                    _ => assert!(false, "Object was not a Hash."),
+                };
             },
             _ => assert!(false, "Object type is not supported."),
         }
@@ -460,6 +686,13 @@ mod test {
         match actual {
             Object::Boolean(b) => assert_eq!(b.value, expected),
             _ => assert!(false, "Object was not a Boolean."),
+        }
+    }
+
+    fn test_string_object(expected: String, actual: &Object) {
+        match actual {
+            Object::String(s) => assert_eq!(s.value, expected),
+            _ => assert!(false, "Object was not a String."),
         }
     }
 }

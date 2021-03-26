@@ -21,6 +21,9 @@ pub enum OpCode {
     OpNull,
     OpGetGlobal,
     OpSetGlobal,
+    OpArray,
+    OpHash,
+    OpIndex,
 }
 
 impl From<u8> for OpCode {
@@ -44,6 +47,9 @@ impl From<u8> for OpCode {
             16 => OpCode::OpNull,
             17 => OpCode::OpGetGlobal,
             18 => OpCode::OpSetGlobal,
+            19 => OpCode::OpArray,
+            20 => OpCode::OpHash,
+            21 => OpCode::OpIndex,
             _ => OpCode::OpNull,
         }
     }
@@ -80,6 +86,9 @@ fn lookup(op: &OpCode) -> Definition {
         OpCode::OpNull => Definition::new("OpNull", vec![]),
         OpCode::OpGetGlobal => Definition::new("OpGetGlobal", vec![2]),
         OpCode::OpSetGlobal => Definition::new("OpSetGlobal", vec![2]),
+        OpCode::OpArray => Definition::new("OpArray", vec![2]),
+        OpCode::OpHash => Definition::new("OpHash", vec![2]),
+        OpCode::OpIndex => Definition::new("OpIndex", vec![]),
     }
 }
 
