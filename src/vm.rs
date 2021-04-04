@@ -1,5 +1,6 @@
 use super::code::*;
 use super::compiler::Bytecode;
+use super::frame::Frame;
 use super::GLOBALS_SIZE;
 use super::object::*;
 use std::cell::RefCell;
@@ -7,23 +8,31 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 const STACK_SIZE: usize = 2048;
+const MAX_FRAMES: usize = 1024;
 
 pub struct VM {
     constants: Vec<Object>,
-    instructions: Instructions,
     stack: Vec<Object>,
     sp: usize, // Always points to the next value; top of stack is sp - 1
     globals: Rc<RefCell<Vec<Object>>>,
+    frames: Vec<Frame>,
+    frames_index: usize,
 }
 
 impl VM {
     pub fn new(bytecode: Bytecode) -> Self {
+        let main_fun = CompiledFunction::new(bytecode.instructions, 0, 0);
+        let main_frame = Frame::new(main_fun, 0);
+        let mut frames = vec![Frame::new(CompiledFunction::new(vec![], 0, 0), 0); MAX_FRAMES];
+        frames[0] = main_frame;
+
         Self {
-            instructions: bytecode.instructions,
             constants: bytecode.constants,
             stack: vec![Object::NonPrint; STACK_SIZE],
             sp: 0,
             globals: Rc::new(RefCell::new(vec![Object::NonPrint; GLOBALS_SIZE])),
+            frames: frames,
+            frames_index: 1,
         }
     }
 
@@ -35,18 +44,21 @@ impl VM {
     }
     
     pub fn run(&mut self) -> Result<(), String> {
-        let mut ip = 0;
-        while ip < self.instructions.len() {
-            let op = OpCode::from(self.instructions[ip]);
+        while self.current_frame().ip < (self.current_frame().instructions().len() - 1) as i64 {
+            self.current_frame_mut().ip += 1;
+
+            let ip = self.current_frame().ip as usize;
+            let instructions = self.current_frame().instructions();
+            let op = OpCode::from(instructions[ip]);
 
             match op {
                 OpCode::OpConstant => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let const_index = read_u16(&bytes);
-                    ip += 2;
+                    self.current_frame_mut().ip += 2;
 
                     if let Err(e) = self.push(self.constants[const_index as usize].clone()) {
                         return Err(e);
@@ -85,23 +97,23 @@ impl VM {
                 },
                 OpCode::OpJump => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let position = read_u16(&bytes);
-                    ip = position as usize - 1;
+                    self.current_frame_mut().ip = position as i64 - 1;
                 },
                 OpCode::OpJumpNotTruthy => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let position = read_u16(&bytes);
-                    ip += 2;
+                    self.current_frame_mut().ip += 2;
 
                     let condition = self.pop();
                     if !self.is_truthy(condition) {
-                        ip = position as usize - 1;
+                        self.current_frame_mut().ip = position as i64 - 1;
                     }
                 },
                 OpCode::OpNull => {
@@ -111,21 +123,21 @@ impl VM {
                 },
                 OpCode::OpSetGlobal => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let global_index = read_u16(&bytes);
-                    ip += 2;
+                    self.current_frame_mut().ip += 2;
 
                     self.globals.borrow_mut()[global_index as usize] = self.pop();
                 },
                 OpCode::OpGetGlobal => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let global_index = read_u16(&bytes);
-                    ip += 2;
+                    self.current_frame_mut().ip += 2;
 
                     let value = self.globals.borrow()[global_index as usize].clone();
                     if let Err(e) = self.push(value) {
@@ -134,11 +146,11 @@ impl VM {
                 },
                 OpCode::OpArray => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let num_elements = read_u16(&bytes);
-                    ip += 2;
+                    self.current_frame_mut().ip += 2;
 
                     let array = self.build_array(self.sp - num_elements as usize, self.sp);
                     self.sp -= num_elements as usize;
@@ -149,11 +161,11 @@ impl VM {
                 },
                 OpCode::OpHash => {
                     let mut bytes = [0; 2];
-                    bytes[0] = self.instructions[ip + 1];
-                    bytes[1] = self.instructions[ip + 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
 
                     let num_elements = read_u16(&bytes);
-                    ip += 2;
+                    self.current_frame_mut().ip += 2;
 
                     match self.build_hash(self.sp - num_elements as usize, self.sp) {
                         Ok(hash) => {
@@ -174,10 +186,57 @@ impl VM {
                         return Err(e);
                     }
                 },
-                _ => (),
-            };
+                OpCode::OpCall => {
+                    let mut byte = [0; 1];
+                    byte[0] = self.current_frame().instructions()[ip + 1];
+                    let number_arguments = read_u8(&byte);
+                    self.current_frame_mut().ip += 1;
 
-            ip += 1;
+                    if let Err(e) = self.call_function(number_arguments as usize) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpReturnValue => {
+                    let return_value = self.pop();
+
+                    let frame = self.pop_frame();
+                    self.sp = frame.base_pointer - 1;
+
+                    if let Err(e) = self.push(return_value) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpReturn => {
+                    let frame = self.pop_frame();
+                    self.sp = frame.base_pointer - 1;
+
+                    if let Err(e) = self.push(Object::Null(Null::new())) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpSetLocal => {
+                    let mut byte = [0; 1];
+                    byte[0] = self.current_frame().instructions()[ip + 1];
+                    let local_index = read_u8(&byte);
+                    self.current_frame_mut().ip += 1;
+
+                    let frame = self.current_frame().clone();
+
+                    self.stack[frame.base_pointer + local_index as usize] = self.pop();
+                },
+                OpCode::OpGetLocal => {
+                    let mut byte = [0; 1];
+                    byte[0] = self.current_frame().instructions()[ip + 1];
+                    let local_index = read_u8(&byte);
+                    self.current_frame_mut().ip += 1;
+
+                    let frame = self.current_frame().clone();
+
+                    if let Err(e) = self.push(self.stack[frame.base_pointer + local_index as usize].clone()) {
+                        return Err(e);
+                    }
+                },
+            };
         }
 
         Ok(())
@@ -365,6 +424,43 @@ impl VM {
             Object::Null(_) => false,
             _ => true,
         }
+    }
+
+    fn current_frame(&self) -> Frame {
+        self.frames[self.frames_index - 1].clone()
+    }
+
+    fn current_frame_mut(&mut self) -> &mut Frame {
+        &mut self.frames[self.frames_index - 1]
+    }
+
+    fn push_frame(&mut self, frame: Frame) {
+        self.frames[self.frames_index] = frame;
+        self.frames_index += 1;
+    }
+
+    fn pop_frame(&mut self) -> Frame {
+        self.frames_index -= 1;
+
+        self.frames[self.frames_index].clone()
+    }
+
+    fn call_function(&mut self, number_arguments: usize) -> Result<(), String> {
+        match self.stack[self.sp - 1 - number_arguments].clone() {
+            Object::CompiledFunction(cf) => {
+                if number_arguments != cf.num_parameters {
+                    return Err(format!("wrong number of arguments: want {}, got {}",
+                        cf.num_parameters, number_arguments));
+                }
+
+                let frame = Frame::new(cf.clone(), self.sp - number_arguments);
+                self.push_frame(frame.clone());
+                self.sp = frame.base_pointer + cf.num_locals;
+            },
+            _ => return Err(String::from("calling non-function")),
+        };
+
+        Ok(())
     }
 
     pub fn last_popped_stack_element(&self) -> Object {
@@ -604,6 +700,198 @@ mod test {
 
         run_vm_tests(vm_test_cases);
         run_vm_tests(vm_test_cases_2);
+    }
+
+    #[test]
+    fn test_calling_functions_without_arguments() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let fivePlusTen = fn() { 5 + 10; };
+fivePlusTen();
+"#, expected: 15 },
+            VMTestCase { input: r#"
+let one = fn() { 1; };
+let two = fn() { 2; };
+one() + two()
+"#, expected: 3 },
+            VMTestCase { input: r#"
+let a = fn() { 1 };
+let b = fn() { a() + 1 };
+let c = fn() { b() + 1 };
+c();
+"#, expected: 3 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_functions_with_return_statement() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let earlyExit = fn() { return 99; 100; };
+earlyExit();
+"#, expected: 99 },
+            VMTestCase { input: r#"
+let earlyExit = fn() { return 99; return 100; };
+earlyExit();
+"#, expected: 99 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_functions_without_return_value() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let noReturn = fn() { };
+noReturn();
+"#, expected: None },
+            VMTestCase { input: r#"
+let noReturn = fn() { };
+let noReturnTwo = fn() { noReturn(); };
+noReturn();
+noReturnTwo();
+"#, expected: None },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_first_class_functions() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let returnsOne = fn() { 1; };
+let returnsOneReturner = fn() { returnsOne; };
+returnsOneReturner()();
+"#, expected: 1 },
+            VMTestCase { input: r#"
+let returnsOneReturner = fn() { 
+    let returnsOne = fn() { 1; };    
+    returnsOne; 
+};
+returnsOneReturner()();
+"#, expected: 1 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_calling_functions_with_bindings() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let one = fn() { let one = 1; one };
+one();
+"#, expected: 1 },
+            VMTestCase { input: r#"
+let oneAndTwo = fn() { let one = 1; let two = 2; one + two; };
+oneAndTwo();
+"#, expected: 3 },
+            VMTestCase { input: r#"
+let oneAndTwo = fn() { let one = 1; let two = 2; one + two; };
+let threeAndFour = fn() { let three = 3; let four = 4; three + four; };
+oneAndTwo() + threeAndFour();
+"#, expected: 10 },
+            VMTestCase { input: r#"
+let firstFoobar = fn() { let foobar = 50; foobar; };
+let secondFoobar = fn() { let foobar = 100; foobar; };
+firstFoobar() + secondFoobar();
+"#, expected: 150 },
+            VMTestCase { input: r#"
+let globalSeed = 50;
+let minusOne = fn() {
+    let num = 1;
+    globalSeed - num;
+}
+let minusTwo = fn() {
+    let num = 2;
+    globalSeed - num;
+}
+minusOne() + minusTwo();
+"#, expected: 97 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_calling_functions_with_arguments_and_bindings() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let identity = fn(a) { a; };
+identity(4);
+"#, expected: 4 },
+            VMTestCase { input: r#"
+let sum = fn(a, b) { a + b; };
+sum(1, 2);
+"#, expected: 3 },
+            VMTestCase { input: r#"
+let sum = fn(a, b) {
+    let c = a + b;
+    c;
+};
+sum(1, 2);
+"#, expected: 3 },
+            VMTestCase { input: r#"
+let sum = fn(a, b) {
+    let c = a + b;
+    c;
+};
+sum(1, 2) + sum(3, 4);
+"#, expected: 10 },
+            VMTestCase { input: r#"
+let sum = fn(a, b) {
+    let c = a + b;
+    c;
+};
+let outer = fn() {
+    sum(1, 2) + sum(3, 4);
+};
+outer();
+"#, expected: 10 },
+            VMTestCase { input: r#"
+let globalNum = 10;
+
+let sum = fn(a, b) {
+    let c = a + b;
+    c + globalNum;
+};
+
+let outer = fn() {
+    sum(1, 2) + sum(3, 4) + globalNum;
+};
+
+outer() + globalNum;
+"#, expected: 50 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_calling_functions_with_wrong_arguments() {
+        let vm_test_cases = vec![
+            VMTestCase { input: "fn() { 1; }(1);", expected: String::from("wrong number of arguments: want 0, got 1") },
+            VMTestCase { input: "fn(a) { a; }();", expected: String::from("wrong number of arguments: want 1, got 0") },
+            VMTestCase { input: "fn(a, b) { a + b; }(1);", expected: String::from("wrong number of arguments: want 2, got 1") },
+        ];
+
+        for vm_test_case in vm_test_cases {
+            let program = parse(vm_test_case.input);
+            let mut compiler = Compiler::new();
+            if let Err(e) = compiler.compile(&Node::Program(program)) {
+                assert!(false, format!("compiler error: {}", e));
+            }
+
+            let mut vm = VM::new(compiler.bytecode());
+            match vm.run() {
+                Ok(_) => assert!(false, "VM error was expected, but did not appear."),
+                Err(e) => assert_eq!(e, vm_test_case.expected),
+            }
+        }
     }
 
     fn run_vm_tests<T>(tests: Vec<VMTestCase<T>>) where T: ValueType {

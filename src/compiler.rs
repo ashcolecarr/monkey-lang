@@ -1,7 +1,7 @@
 use super::ast::*;
 use super::code::*;
 use super::object::*;
-use super::symbol_table::SymbolTable;
+use super::symbol_table::{GLOBAL_SCOPE, SymbolTable};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -18,8 +18,8 @@ impl Bytecode {
 
 #[derive(Clone)]
 pub struct EmittedInstruction {
-    pub opcode: OpCode,
-    pub position: usize,
+    opcode: OpCode,
+    position: usize,
 }
 
 impl EmittedInstruction {
@@ -28,22 +28,34 @@ impl EmittedInstruction {
     }
 }
 
+pub struct CompilationScope {
+    instructions: Instructions,
+    last_instruction: EmittedInstruction,
+    previous_instruction: EmittedInstruction,
+}
+
+impl CompilationScope {
+    pub fn new(instructions: Instructions, last_instruction: EmittedInstruction, previous_instruction: EmittedInstruction) -> Self {
+        Self { instructions, last_instruction, previous_instruction }
+    }
+}
+
 pub struct Compiler {
-    pub instructions: Instructions,
-    pub constants: Rc<RefCell<Vec<Object>>>,
-    pub last_instruction: EmittedInstruction,
-    pub previous_instruction: EmittedInstruction,
-    pub symbol_table: Rc<RefCell<SymbolTable>>,
+    constants: Rc<RefCell<Vec<Object>>>,
+    symbol_table: Rc<RefCell<SymbolTable>>,
+    scopes: Vec<CompilationScope>,
+    scope_index: usize,
 }
 
 impl Compiler {
     pub fn new() -> Self {
+        let main_scope = CompilationScope::new(vec![], EmittedInstruction::new(OpCode::OpConstant, 0), EmittedInstruction::new(OpCode::OpConstant, 0));
+
         Self {
-            instructions: vec![],
             constants: Rc::new(RefCell::new(vec![])),
-            last_instruction: EmittedInstruction::new(OpCode::OpConstant, 0),
-            previous_instruction: EmittedInstruction::new(OpCode::OpConstant, 0),
             symbol_table: Rc::new(RefCell::new(SymbolTable::new())),
+            scopes: vec![main_scope],
+            scope_index: 0,
         }
     }
 
@@ -89,10 +101,22 @@ impl Compiler {
                             }
 
                             let symbol = self.symbol_table.borrow_mut().define(ls.name.value.as_str());
-                            self.emit(OpCode::OpSetGlobal, vec![symbol.index as i64]);
+                            if symbol.scope == GLOBAL_SCOPE {
+                                self.emit(OpCode::OpSetGlobal, vec![symbol.index as i64]);
+                            } else {
+                                self.emit(OpCode::OpSetLocal, vec![symbol.index as i64]);
+                            }
                         }
                     },
-                    _ => (),
+                    Statement::ReturnStatement(rs) => {
+                        if let Some(ret_val) = &rs.return_value {
+                            if let Err(e) = self.compile(&Node::Expression(ret_val.clone())) {
+                                return Err(e);
+                            }
+
+                            self.emit(OpCode::OpReturnValue, vec![]);
+                        }
+                    },
                 }
             },
             Node::Expression(exp) => {
@@ -167,14 +191,14 @@ impl Compiler {
                             return Err(e);
                         }
 
-                        if self.last_instruction_is_pop() {
+                        if self.last_instruction_is(&OpCode::OpPop) {
                             self.remove_last_pop();
                         }
 
                         // Emit jump instruction with placeholder value.
                         let jump_position = self.emit(OpCode::OpJump, vec![9999]);
 
-                        let after_consequence_position = self.instructions.len();
+                        let after_consequence_position = self.scopes[self.scope_index].instructions.len();
                         self.change_operand(jump_not_truthy_position, after_consequence_position as i64);
 
                         match &ie.alternative {
@@ -183,7 +207,7 @@ impl Compiler {
                                     return Err(e);
                                 }
                                 
-                                if self.last_instruction_is_pop() {
+                                if self.last_instruction_is(&OpCode::OpPop) {
                                     self.remove_last_pop();
                                 }
 
@@ -192,13 +216,19 @@ impl Compiler {
                                 self.emit(OpCode::OpNull, vec![]);
                             },
                         }
-                        let after_alternative_position = self.instructions.len();
+                        let after_alternative_position = self.scopes[self.scope_index].instructions.len();
                         self.change_operand(jump_position, after_alternative_position as i64);
                     },
                     Expression::Identifier(id) => {
                         let symbol = self.symbol_table.borrow().resolve(id.value.as_str());
                         match symbol {
-                            Some(sym) => self.emit(OpCode::OpGetGlobal, vec![sym.index as i64]),
+                            Some(sym) => {
+                                if sym.scope == GLOBAL_SCOPE {
+                                    self.emit(OpCode::OpGetGlobal, vec![sym.index as i64]);
+                                } else {
+                                    self.emit(OpCode::OpGetLocal, vec![sym.index as i64]);
+                                }
+                            },
                             None => return Err(format!("undefined variable {}", id.value)),
                         };
                     },
@@ -247,7 +277,45 @@ impl Compiler {
 
                         self.emit(OpCode::OpIndex, vec![]);
                     },
-                    _ => (),
+                    Expression::FunctionLiteral(fl) => {
+                        self.enter_scope();
+
+                        for parameter in &fl.parameters {
+                            self.symbol_table.borrow_mut().define(parameter.value.as_str());
+                        }
+
+                        if let Err(e) = self.compile(&Node::Statement(Statement::BlockStatement(fl.body.clone()))) {
+                            return Err(e);
+                        }
+
+                        if self.last_instruction_is(&OpCode::OpPop) {
+                            self.replace_last_pop_with_return();
+                        }
+
+                        if !self.last_instruction_is(&OpCode::OpReturnValue) {
+                            self.emit(OpCode::OpReturn, vec![]);
+                        }
+
+                        let num_locals = self.symbol_table.borrow().num_definitions;
+                        let instructions = self.leave_scope();
+
+                        let compiled_fn = Object::CompiledFunction(CompiledFunction::new(instructions, num_locals, fl.parameters.len()));
+                        let constant_index = self.add_constant(compiled_fn) as i64;
+                        self.emit(OpCode::OpConstant, vec![constant_index]);
+                    },
+                    Expression::CallExpression(ce) => {
+                        if let Err(e) = self.compile(&Node::Expression(*ce.function.clone())) {
+                            return Err(e);
+                        }
+
+                        for argument in &ce.arguments {
+                            if let Err(e) = self.compile(&Node::Expression(argument.clone())) {
+                                return Err(e);
+                            }
+                        }
+
+                        self.emit(OpCode::OpCall, vec![ce.arguments.len() as i64]);
+                    },
                 }
             }
         };
@@ -256,7 +324,7 @@ impl Compiler {
     }
 
     pub fn bytecode(&self) -> Bytecode {
-        Bytecode::new(self.instructions.clone(), self.constants.borrow().clone())
+        Bytecode::new(self.scopes[self.scope_index].instructions.clone(), self.constants.borrow().clone())
     }
 
     fn add_constant(&mut self, object: Object) -> usize {
@@ -275,31 +343,43 @@ impl Compiler {
     }
 
     fn add_instruction(&mut self, instruction: Instructions) -> usize {
-        let position_new_instruction = self.instructions.len();
-        self.instructions.extend(instruction);
+        //let position_new_instruction = self.current_instructions().len();
+        let position_new_instruction = self.scopes[self.scope_index].instructions.len();
+        self.scopes[self.scope_index].instructions.extend(instruction);
 
         position_new_instruction
     }
 
     fn set_last_instruction(&mut self, op: OpCode, position: usize) {
-        let previous = self.last_instruction.clone();
+        let previous = self.scopes[self.scope_index].last_instruction.clone();
         let last = EmittedInstruction::new(op, position);
 
-        self.previous_instruction = previous;
-        self.last_instruction = last;
+        self.scopes[self.scope_index].previous_instruction = previous;
+        self.scopes[self.scope_index].last_instruction = last;
     }
 
-    fn last_instruction_is_pop(&self) -> bool {
-        self.last_instruction.opcode == OpCode::OpPop
+    fn last_instruction_is(&self, op: &OpCode) -> bool {
+        if self.current_instructions().is_empty() {
+            false
+        } else {
+            self.scopes[self.scope_index].last_instruction.opcode == *op
+        }
     }
 
     fn remove_last_pop(&mut self) {
-        self.instructions = self.instructions[..self.last_instruction.position].to_vec();
-        self.last_instruction = self.previous_instruction.clone();
+        let last = self.scopes[self.scope_index].last_instruction.clone();
+        let previous = self.scopes[self.scope_index].previous_instruction.clone();
+
+        //let old = self.current_instructions();
+        let old = self.scopes[self.scope_index].instructions.clone();
+        let new = old[..last.position].to_vec();
+
+        self.scopes[self.scope_index].instructions = new;
+        self.scopes[self.scope_index].last_instruction = previous;
     }
 
     fn change_operand(&mut self, op_position: usize, operand: i64) {
-        let op = OpCode::from(self.instructions[op_position]);
+        let op = OpCode::from(self.scopes[self.scope_index].instructions[op_position]);
         let new_instruction = make(op, vec![operand]);
 
         self.replace_instruction(op_position, new_instruction);
@@ -307,8 +387,42 @@ impl Compiler {
 
     fn replace_instruction(&mut self, position: usize, new_instruction: Instructions) {
         for (i, _) in new_instruction.iter().enumerate() {
-            self.instructions[position + i] = new_instruction[i];
+            self.scopes[self.scope_index].instructions[position + i] = new_instruction[i];
         }
+    }
+
+    fn current_instructions(&self) -> Instructions {
+        self.scopes[self.scope_index].instructions.clone()
+    }
+
+    fn enter_scope(&mut self) {
+        let scope = CompilationScope::new(vec![], EmittedInstruction::new(OpCode::OpConstant, 0), EmittedInstruction::new(OpCode::OpConstant, 0));
+        self.scopes.push(scope);
+        self.scope_index += 1;
+
+        self.symbol_table = Rc::new(RefCell::new(SymbolTable::new_enclosed(self.symbol_table.clone())))
+    }
+
+    fn leave_scope(&mut self) -> Instructions {
+        let instructions = self.current_instructions();
+
+        self.scopes.remove(self.scopes.len() - 1);
+        self.scope_index -= 1;
+
+        let outer = self.symbol_table.borrow().outer.clone();
+        match outer {
+            Some(o) => self.symbol_table = o,
+            None => (),
+        }
+
+        instructions
+    }
+
+    fn replace_last_pop_with_return(&mut self) {
+        let last_position = self.scopes[self.scope_index].last_instruction.position;
+        self.replace_instruction(last_position, make(OpCode::OpReturnValue, vec![]));
+
+        self.scopes[self.scope_index].last_instruction.opcode = OpCode::OpReturnValue;
     }
 }
 
@@ -349,6 +463,17 @@ mod test {
     struct CompilerTestCase<'a, T> where T: ValueType {
         input: &'a str,
         expected_constants: Vec<T>,
+        expected_instructions: Vec<Instructions>,
+    }
+
+    enum ConstantType {
+        Int(i64),
+        Instructions(Vec<Instructions>),
+    }
+
+    struct CompiledFunctionTestCase<'a> {
+        input: &'a str,
+        expected_constants: Vec<ConstantType>,
         expected_instructions: Vec<Instructions>,
     }
 
@@ -751,6 +876,286 @@ two;
         run_compiler_tests(compiler_test_cases);
     }
 
+    #[test]
+    fn test_functions() {
+        let compiler_test_cases = vec![
+            CompiledFunctionTestCase {
+                input: "fn() { return 5 + 10 }",
+                expected_constants: vec![
+                    ConstantType::Int(5), 
+                    ConstantType::Int(10),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpConstant, vec![1]),
+                        make(OpCode::OpAdd, vec![]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: "fn() { 5 + 10 }",
+                expected_constants: vec![
+                    ConstantType::Int(5), 
+                    ConstantType::Int(10),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpConstant, vec![1]),
+                        make(OpCode::OpAdd, vec![]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: "fn() { 1; 2 }",
+                expected_constants: vec![
+                    ConstantType::Int(1), 
+                    ConstantType::Int(2),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpPop, vec![]),
+                        make(OpCode::OpConstant, vec![1]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiled_function_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_compiler_scopes() {
+        let mut compiler = Compiler::new();
+        assert_eq!(compiler.scope_index, 0);
+        let global_symbol_table = compiler.symbol_table.borrow().clone();
+
+        compiler.emit(OpCode::OpMul, vec![]);
+
+        compiler.enter_scope();
+        assert_eq!(compiler.scope_index, 1);
+
+        compiler.emit(OpCode::OpSub, vec![]);
+
+        assert_eq!(compiler.scopes[compiler.scope_index].instructions.len(), 1);
+
+        let mut last = &compiler.scopes[compiler.scope_index].last_instruction;
+        assert_eq!(last.opcode, OpCode::OpSub);
+
+        assert_eq!(compiler.symbol_table.borrow().clone().outer.unwrap().borrow().clone(), global_symbol_table);
+
+        compiler.leave_scope();
+        assert_eq!(compiler.scope_index, 0);
+
+        assert_eq!(compiler.symbol_table.borrow().clone(), global_symbol_table);
+
+        compiler.emit(OpCode::OpAdd, vec![]);
+
+        assert_eq!(compiler.scopes[compiler.scope_index].instructions.len(), 2);
+
+        last = &compiler.scopes[compiler.scope_index].last_instruction;
+        assert_eq!(last.opcode, OpCode::OpAdd);
+
+        let previous = &compiler.scopes[compiler.scope_index].previous_instruction;
+        assert_eq!(previous.opcode, OpCode::OpMul);
+    }
+
+    #[test]
+    fn test_functions_without_return_value() {
+        let compiler_test_cases = vec![
+            CompiledFunctionTestCase {
+                input: "fn() { }",
+                expected_constants: vec![
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpReturn, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiled_function_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_function_calls() {
+        let compiler_test_cases = vec![
+            CompiledFunctionTestCase {
+                input: "fn() { 24 }();",
+                expected_constants: vec![
+                    ConstantType::Int(24),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpCall, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: r#"
+let noArg = fn() { 24 };
+noArg();"#,
+                expected_constants: vec![
+                    ConstantType::Int(24),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpGetGlobal, vec![0]),
+                    make(OpCode::OpCall, vec![0]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: r#"
+let oneArg = fn(a) { a };
+oneArg(24);"#,
+                expected_constants: vec![
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpGetLocal, vec![0]),
+                        make(OpCode::OpReturnValue, vec![]),
+                        ]),
+                    ConstantType::Int(24),
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpGetGlobal, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpCall, vec![1]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: r#"
+let manyArg = fn(a, b, c) { a; b; c };
+manyArg(24, 25, 26);"#,
+                expected_constants: vec![
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpGetLocal, vec![0]),
+                        make(OpCode::OpPop, vec![]),
+                        make(OpCode::OpGetLocal, vec![1]),
+                        make(OpCode::OpPop, vec![]),
+                        make(OpCode::OpGetLocal, vec![2]),
+                        make(OpCode::OpReturnValue, vec![]),
+                        ]),
+                    ConstantType::Int(24),
+                    ConstantType::Int(25),
+                    ConstantType::Int(26),
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpGetGlobal, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpConstant, vec![3]),
+                    make(OpCode::OpCall, vec![3]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiled_function_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_let_statement_scopes() {
+        let compiler_test_cases = vec![
+            CompiledFunctionTestCase {
+                input: r#"
+let num = 55;
+fn() { num }
+"#,
+                expected_constants: vec![
+                    ConstantType::Int(55),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpGetGlobal, vec![0]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpSetGlobal, vec![0]),
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: r#"
+fn() {
+    let num = 55;
+    num
+}
+"#,
+                expected_constants: vec![
+                    ConstantType::Int(55),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpSetLocal, vec![0]),
+                        make(OpCode::OpGetLocal, vec![0]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![1]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: r#"
+fn() {
+    let a = 55;
+    let b = 77;
+    a + b
+}
+"#,
+                expected_constants: vec![
+                    ConstantType::Int(55),
+                    ConstantType::Int(77),
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpConstant, vec![0]),
+                        make(OpCode::OpSetLocal, vec![0]),
+                        make(OpCode::OpConstant, vec![1]),
+                        make(OpCode::OpSetLocal, vec![1]),
+                        make(OpCode::OpGetLocal, vec![0]),
+                        make(OpCode::OpGetLocal, vec![1]),
+                        make(OpCode::OpAdd, vec![]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiled_function_tests(compiler_test_cases);
+    }
+
     fn run_compiler_tests<T>(tests: Vec<CompilerTestCase<T>>) where T: ValueType {
         for test in tests {
             let program = parse(test.input);
@@ -762,6 +1167,23 @@ two;
                     test_instructions(&test.expected_instructions, &bytecode.instructions.clone());
         
                     test_constants(&test.expected_constants, &bytecode.constants.clone());
+                },
+                Err(e) => assert!(false, format!("compiler error: {}", e)),
+            };
+        }
+    }
+
+    fn run_compiled_function_tests(tests: Vec<CompiledFunctionTestCase>) {
+        for test in tests {
+            let program = parse(test.input);
+            let mut compiler = Compiler::new();
+
+            match compiler.compile(&Node::Program(program)) {
+                Ok(_) => {
+                    let bytecode = compiler.bytecode();
+                    test_instructions(&test.expected_instructions, &bytecode.instructions.clone());
+        
+                    test_function_constants(&test.expected_constants, &bytecode.constants.clone());
                 },
                 Err(e) => assert!(false, format!("compiler error: {}", e)),
             };
@@ -805,6 +1227,22 @@ two;
                 "i64" => test_integer_object(constant.get_i64(), &actual[i]),
                 "String" => test_string_object(constant.get_string(), &actual[i]),
                 _ => assert!(false, "Constant type is not supported."),
+            };
+        }
+    }
+
+    fn test_function_constants<>(expected: &Vec<ConstantType>, actual: &Vec<Object>) {
+        assert_eq!(expected.len(), actual.len());
+
+        for (i, constant) in expected.iter().enumerate() {
+            match constant {
+                ConstantType::Int(int) => test_integer_object(*int, &actual[i]),
+                ConstantType::Instructions(ins) => {
+                    match &actual[i] {
+                        Object::CompiledFunction(cf) => test_instructions(ins, &cf.instructions),
+                        _ => assert!(false, "Object was not a CompiledFunction"),
+                    }
+                },
             };
         }
     }

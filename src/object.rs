@@ -1,4 +1,5 @@
 use super::ast::{BlockStatement, Identifier};
+use super::code::Instructions;
 use super::environment::Environment;
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -16,6 +17,7 @@ const STRING_OBJ: &str = "STRING";
 const BUILTIN_OBJ: &str = "BUILTIN"; 
 const ARRAY_OBJ: &str = "ARRAY"; 
 const HASH_OBJ: &str = "HASH"; 
+const COMPILED_FUNCTION_OBJ: &str = "COMPILED_FUNCTION"; 
 
 pub type BuiltinFunction = fn(arguments: &Vec<Object>) -> Object;
 
@@ -31,7 +33,8 @@ pub enum Object {
     String(StringObject),
     Builtin(Builtin),
     Array(Array),
-    Hash(HashObject)
+    Hash(HashObject),
+    CompiledFunction(CompiledFunction),
 }
 
 impl Display for Object {
@@ -48,6 +51,7 @@ impl Display for Object {
             Self::Builtin(b) => format!("{}", b),
             Self::Array(a) => format!("{}", a),
             Self::Hash(h) => format!("{}", h),
+            Self::CompiledFunction(cf) => format!("{}", cf),
         })
     }
 }
@@ -66,6 +70,7 @@ impl Object {
             Self::Builtin(b) => b.type_of(),
             Self::Array(a) => a.type_of(),
             Self::Hash(h) => h.type_of(),
+            Self::CompiledFunction(cf) => cf.type_of(),
         }
     }
 
@@ -331,6 +336,42 @@ impl HashObject {
 
     pub fn type_of(&self) -> &str {
         HASH_OBJ
+    }
+}
+
+#[derive(Clone)]
+pub struct CompiledFunction {
+    pub instructions: Instructions,
+    pub num_locals: usize,
+    pub num_parameters: usize,
+}
+
+impl Display for CompiledFunction {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "CompiledFunction[{}]", self)
+    }
+}
+
+impl PartialEq for CompiledFunction {
+    fn eq(&self, _other: &CompiledFunction) -> bool {
+        panic!("PartialEq is not supported for CompiledFunction.");
+    }
+}
+impl Eq for CompiledFunction {}
+
+impl Hash for CompiledFunction {
+    fn hash<H: Hasher>(&self, _state: &mut H) {
+        panic!("Hash is not supported for CompiledFunction.");
+    }
+}
+
+impl CompiledFunction {
+    pub fn new(instructions: Instructions, num_locals: usize, num_parameters: usize) -> Self {
+        Self { instructions, num_locals, num_parameters }
+    }
+
+    pub fn type_of(&self) -> &str {
+        COMPILED_FUNCTION_OBJ
     }
 }
 

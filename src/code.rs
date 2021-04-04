@@ -24,6 +24,11 @@ pub enum OpCode {
     OpArray,
     OpHash,
     OpIndex,
+    OpCall,
+    OpReturnValue,
+    OpReturn,
+    OpGetLocal,
+    OpSetLocal,
 }
 
 impl From<u8> for OpCode {
@@ -50,6 +55,11 @@ impl From<u8> for OpCode {
             19 => OpCode::OpArray,
             20 => OpCode::OpHash,
             21 => OpCode::OpIndex,
+            22 => OpCode::OpCall,
+            23 => OpCode::OpReturnValue,
+            24 => OpCode::OpReturn,
+            25 => OpCode::OpGetLocal,
+            26 => OpCode::OpSetLocal,
             _ => OpCode::OpNull,
         }
     }
@@ -89,6 +99,11 @@ fn lookup(op: &OpCode) -> Definition {
         OpCode::OpArray => Definition::new("OpArray", vec![2]),
         OpCode::OpHash => Definition::new("OpHash", vec![2]),
         OpCode::OpIndex => Definition::new("OpIndex", vec![]),
+        OpCode::OpCall => Definition::new("OpCall", vec![1]),
+        OpCode::OpReturnValue => Definition::new("OpReturnValue", vec![]),
+        OpCode::OpReturn => Definition::new("OpReturn", vec![]),
+        OpCode::OpGetLocal => Definition::new("OpGetLocal", vec![1]),
+        OpCode::OpSetLocal => Definition::new("OpSetLocal", vec![1]),
     }
 }
 
@@ -143,6 +158,10 @@ pub fn make(op: OpCode, operands: Vec<i64>) -> Instructions {
                 instruction[offset] = bytes[0];
                 instruction[offset + 1] = bytes[1];
             },
+            1 => {
+                let byte = u8::to_be_bytes(*operand as u8);
+                instruction[offset] = byte[0];
+            },
             _ => (),
         };
         offset += width as usize;
@@ -164,6 +183,12 @@ pub fn read_operands(definition: &Definition, instructions: &Instructions) -> (V
 
                 read_u16(&bytes) as i64
             },
+            1 => operands[i] = {
+                let mut byte = [0; 1];
+                byte[0] = instructions[offset];
+
+                read_u8(&byte) as i64
+            },
             _ => (),
         };
 
@@ -175,6 +200,10 @@ pub fn read_operands(definition: &Definition, instructions: &Instructions) -> (V
 
 pub fn read_u16(instructions: &[u8; 2]) -> u16 {
     u16::from_be_bytes(*instructions)
+}
+
+pub fn read_u8(instructions: &[u8; 1]) -> u8 {
+    u8::from_be_bytes(*instructions)
 }
 
 #[cfg(test)]
@@ -192,6 +221,7 @@ mod test {
         let make_tests = vec![
             MakeTest { op: OpCode::OpConstant, operands: vec![65534], expected: vec![OpCode::OpConstant as u8, 255, 254] },
             MakeTest { op: OpCode::OpAdd, operands: vec![], expected: vec![OpCode::OpAdd as u8] },
+            MakeTest { op: OpCode::OpGetLocal, operands: vec![255], expected: vec![OpCode::OpGetLocal as u8, 255] },
         ];
 
         for make_test in make_tests {
@@ -208,13 +238,15 @@ mod test {
     fn test_instructions_string() {
         let instructions = vec![
             make(OpCode::OpAdd, vec![]),
+            make(OpCode::OpGetLocal, vec![1]),
             make(OpCode::OpConstant, vec![2]),
             make(OpCode::OpConstant, vec![65535]),
         ];
 
         let expected = r#"0000 OpAdd
-0001 OpConstant 2
-0004 OpConstant 65535
+0001 OpGetLocal 1
+0003 OpConstant 2
+0006 OpConstant 65535
 "#;
 
         let mut concatted = vec![];
@@ -234,7 +266,8 @@ mod test {
         };
 
         let operand_tests = vec![
-            OperandTest { op: OpCode::OpConstant, operands: vec![65535], bytes_read: 2 }
+            OperandTest { op: OpCode::OpConstant, operands: vec![65535], bytes_read: 2 },
+            OperandTest { op: OpCode::OpGetLocal, operands: vec![255], bytes_read: 1 },
         ];
 
         for operand_test in operand_tests {
