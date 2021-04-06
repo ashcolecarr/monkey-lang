@@ -1,3 +1,4 @@
+use super::builtins::Builtins;
 use super::code::*;
 use super::compiler::Bytecode;
 use super::frame::Frame;
@@ -17,6 +18,7 @@ pub struct VM {
     globals: Rc<RefCell<Vec<Object>>>,
     frames: Vec<Frame>,
     frames_index: usize,
+    builtins: Builtins,
 }
 
 impl VM {
@@ -33,6 +35,7 @@ impl VM {
             globals: Rc::new(RefCell::new(vec![Object::NonPrint; GLOBALS_SIZE])),
             frames: frames,
             frames_index: 1,
+            builtins: Builtins::new(),
         }
     }
 
@@ -192,7 +195,7 @@ impl VM {
                     let number_arguments = read_u8(&byte);
                     self.current_frame_mut().ip += 1;
 
-                    if let Err(e) = self.call_function(number_arguments as usize) {
+                    if let Err(e) = self.execute_call(number_arguments as usize) {
                         return Err(e);
                     }
                 },
@@ -235,6 +238,23 @@ impl VM {
                     if let Err(e) = self.push(self.stack[frame.base_pointer + local_index as usize].clone()) {
                         return Err(e);
                     }
+                },
+                OpCode::OpGetBuiltin => {
+                    let mut byte = [0; 1];
+                    byte[0] = self.current_frame().instructions()[ip + 1];
+                    let builtin_index = read_u8(&byte);
+                    self.current_frame_mut().ip += 1;
+
+                    let definition = self.builtins.index(builtin_index as usize);
+
+                    match definition {
+                        Some(def) => {
+                            if let Err(e) = self.push(def) {
+                                return Err(e);
+                            }
+                        },
+                        None => return Err(format!("builtin for index {} could not be found.", builtin_index)),
+                    };
                 },
             };
         }
@@ -445,22 +465,42 @@ impl VM {
         self.frames[self.frames_index].clone()
     }
 
-    fn call_function(&mut self, number_arguments: usize) -> Result<(), String> {
+    fn execute_call(&mut self, number_arguments: usize) -> Result<(), String> {
         match self.stack[self.sp - 1 - number_arguments].clone() {
-            Object::CompiledFunction(cf) => {
-                if number_arguments != cf.num_parameters {
-                    return Err(format!("wrong number of arguments: want {}, got {}",
-                        cf.num_parameters, number_arguments));
-                }
+            Object::CompiledFunction(cf) => self.call_function(&cf, number_arguments),
+            Object::Builtin(bi) => self.call_builtin(&bi, number_arguments),
+            _ => Err(String::from("calling non-function and non-built-in")),
+        }
+    }
 
-                let frame = Frame::new(cf.clone(), self.sp - number_arguments);
-                self.push_frame(frame.clone());
-                self.sp = frame.base_pointer + cf.num_locals;
-            },
-            _ => return Err(String::from("calling non-function")),
-        };
+    fn call_function(&mut self, fun: &CompiledFunction, number_arguments: usize) -> Result<(), String> {
+        if number_arguments != fun.num_parameters {
+            return Err(format!("wrong number of arguments: want {}, got {}",
+                fun.num_parameters, number_arguments));
+        }
+
+        let frame = Frame::new(fun.clone(), self.sp - number_arguments);
+        self.push_frame(frame.clone());
+        self.sp = frame.base_pointer + fun.num_locals;
 
         Ok(())
+    }
+
+    fn call_builtin(&mut self, builtin: &Builtin, number_arguments: usize) -> Result<(), String> {
+        let arguments = self.stack[self.sp - number_arguments..self.sp].to_vec();
+
+        let bi = builtin.builtin_function;
+        let result = bi(&arguments);
+        self.sp = self.sp - number_arguments - 1;
+
+        match result {
+            Object::Null(_) => {
+                self.push(Object::Null(Null::new()))
+            },
+            _ => {
+                self.push(result)
+            }
+        }
     }
 
     pub fn last_popped_stack_element(&self) -> Object {
@@ -484,6 +524,7 @@ mod test {
         fn get_null(&self) -> Option<i8>;
         fn get_array(&self) -> Vec<i64>;
         fn get_hash(&self) -> Vec<(Integer, i64)>;
+        fn get_error(&self) -> Result<(), String>;
     }
 
     impl ValueType for i64 {
@@ -494,6 +535,7 @@ mod test {
         fn get_null(&self) -> Option<i8> { panic!("Value is not an i64.") }
         fn get_array(&self) -> Vec<i64> { panic!("Value is not an i64.") }
         fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not an i64.") }
+        fn get_error(&self) -> Result<(), String> { panic!("Value is not an i64.") }
     }
 
     impl ValueType for String {
@@ -504,6 +546,7 @@ mod test {
         fn get_null(&self) -> Option<i8> { panic!("Value is not a String.") }
         fn get_array(&self) -> Vec<i64> { panic!("Value is not a String.") }
         fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not a String.") }
+        fn get_error(&self) -> Result<(), String> { panic!("Value is not a String.") }
     }
 
     impl ValueType for bool {
@@ -514,6 +557,7 @@ mod test {
         fn get_null(&self) -> Option<i8> { panic!("Value is not a bool.") }
         fn get_array(&self) -> Vec<i64> { panic!("Value is not a bool.") }
         fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not a bool.") }
+        fn get_error(&self) -> Result<(), String> { panic!("Value is not a bool.") }
     }
 
     impl ValueType for Option<i8> {
@@ -524,6 +568,7 @@ mod test {
         fn get_null(&self) -> Option<i8> { None }
         fn get_array(&self) -> Vec<i64> { panic!("Value is not null.") }
         fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not null.") }
+        fn get_error(&self) -> Result<(), String> { panic!("Value is not null.") }
     }
 
     impl ValueType for Vec<i64> {
@@ -534,6 +579,7 @@ mod test {
         fn get_null(&self) -> Option<i8> { panic!("Value is not an array.") }
         fn get_array(&self) -> Vec<i64> { self.clone() }
         fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not an array.") }
+        fn get_error(&self) -> Result<(), String> { panic!("Value is not an array.") }
     }
 
     impl ValueType for Vec<(Integer, i64)> {
@@ -544,6 +590,18 @@ mod test {
         fn get_null(&self) -> Option<i8> { panic!("Value is not a hash.") }
         fn get_array(&self) -> Vec<i64> { panic!("Value is not a hash.") }
         fn get_hash(&self) -> Vec<(Integer, i64)> { self.clone() }
+        fn get_error(&self) -> Result<(), String> { panic!("Value is not a hash.") }
+    }
+
+    impl ValueType for Result<(), String> {
+        fn get_type(&self) -> &str { "Err" }
+        fn get_i64(&self) -> i64 { panic!("Value is not an error.") }
+        fn get_string(&self) -> String { panic!("Value is not an error.") }
+        fn get_bool(&self) -> bool { panic!("Value is not an error.") }
+        fn get_null(&self) -> Option<i8> { panic!("Value is not an error.") }
+        fn get_array(&self) -> Vec<i64> { panic!("Value is not an error.") }
+        fn get_hash(&self) -> Vec<(Integer, i64)> { panic!("Value is not an error.") }
+        fn get_error(&self) -> Result<(), String> { self.clone() }
     }
 
     struct VMTestCase<'a, T> where T: ValueType {
@@ -894,6 +952,44 @@ outer() + globalNum;
         }
     }
 
+    #[test]
+    fn test_builtin_functions() {
+        let vm_test_cases_int = vec![
+            VMTestCase { input: "len(\"\")", expected: 0 },
+            VMTestCase { input: "len(\"four\")", expected: 4 },
+            VMTestCase { input: "len(\"hello world\")", expected: 11 },
+            VMTestCase { input: "len([1, 2, 3])", expected: 3 },
+            VMTestCase { input: "len([])", expected: 0 },
+            VMTestCase { input: "first([1, 2, 3])", expected: 1 },
+            VMTestCase { input: "last([1, 2, 3])", expected: 3 },
+        ];
+
+        let vm_test_cases_none = vec![
+            VMTestCase { input: "puts(\"hello\", \"world!\")", expected: None },
+            VMTestCase { input: "first([])", expected: None },
+            VMTestCase { input: "last([])", expected: None },
+            VMTestCase { input: "rest([])", expected: None },
+        ];
+        
+        let vm_test_cases_error = vec![
+            VMTestCase { input: "len(1)", expected: Err(String::from("argument to \"len\" not supported, got INTEGER")) },
+            VMTestCase { input: "len(\"one\", \"two\")", expected: Err(String::from("wrong number of arguments. got 2, want 1")) },
+            VMTestCase { input: "first(1)", expected: Err(String::from("argument to \"first\" must be ARRAY, got INTEGER")) },
+            VMTestCase { input: "last(1)", expected: Err(String::from("argument to \"last\" must be ARRAY, got INTEGER")) },
+            VMTestCase { input: "push(1, 1)", expected: Err(String::from("argument to \"push\" must be ARRAY, got INTEGER")) },
+        ];
+
+        let vm_test_cases_array = vec![
+            VMTestCase { input: "rest([1, 2, 3])", expected: vec![2, 3] },
+            VMTestCase { input: "push([], 1)", expected: vec![1] },
+        ];
+
+        run_vm_tests(vm_test_cases_int);
+        run_vm_tests(vm_test_cases_none);
+        run_vm_tests(vm_test_cases_error);
+        run_vm_tests(vm_test_cases_array);
+    }
+
     fn run_vm_tests<T>(tests: Vec<VMTestCase<T>>) where T: ValueType {
         for test in tests {
             let program = parse(test.input);
@@ -958,6 +1054,12 @@ outer() + globalNum;
                     },
                     _ => assert!(false, "Object was not a Hash."),
                 };
+            },
+            "Err" => {
+                match actual {
+                    Object::Error(e) => assert_eq!(e.message, if let Err(e) = expected.get_error() { e } else { String::new() }),
+                    _ => assert!(false, "Object was not an Error."),
+                }
             },
             _ => assert!(false, "Object type is not supported."),
         }

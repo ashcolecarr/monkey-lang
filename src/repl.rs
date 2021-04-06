@@ -1,4 +1,5 @@
 use super::ast::Node;
+use super::builtins::Builtins;
 use super::compiler::Compiler;
 use super::GLOBALS_SIZE;
 use super::lexer::Lexer;
@@ -17,7 +18,12 @@ pub fn start() {
 
     let constants: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(vec![]));
     let globals: Rc<RefCell<Vec<Object>>> = Rc::new(RefCell::new(vec![Object::NonPrint; GLOBALS_SIZE]));
+    let builtins = Builtins::new();
     let symbol_table = Rc::new(RefCell::new(SymbolTable::new()));
+    for (key, _) in &builtins.builtins {
+        let index = builtins.get_index(key.as_str());
+        symbol_table.borrow_mut().define_builtin(index, key.as_str());
+    }
 
     loop {
         print!("{}", PROMPT);

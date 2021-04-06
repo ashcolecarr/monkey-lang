@@ -1,7 +1,8 @@
 use super::ast::*;
+use super::builtins::Builtins;
 use super::code::*;
 use super::object::*;
-use super::symbol_table::{GLOBAL_SCOPE, SymbolTable};
+use super::symbol_table::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -50,10 +51,17 @@ pub struct Compiler {
 impl Compiler {
     pub fn new() -> Self {
         let main_scope = CompilationScope::new(vec![], EmittedInstruction::new(OpCode::OpConstant, 0), EmittedInstruction::new(OpCode::OpConstant, 0));
+        let mut symbol_table = SymbolTable::new();
+        let builtins = Builtins::new();
+
+        for (key, _) in &builtins.builtins {
+            let index = builtins.get_index(key.as_str());
+            symbol_table.define_builtin(index, key.as_str());
+        }
 
         Self {
             constants: Rc::new(RefCell::new(vec![])),
-            symbol_table: Rc::new(RefCell::new(SymbolTable::new())),
+            symbol_table: Rc::new(RefCell::new(symbol_table)),
             scopes: vec![main_scope],
             scope_index: 0,
         }
@@ -101,11 +109,10 @@ impl Compiler {
                             }
 
                             let symbol = self.symbol_table.borrow_mut().define(ls.name.value.as_str());
-                            if symbol.scope == GLOBAL_SCOPE {
-                                self.emit(OpCode::OpSetGlobal, vec![symbol.index as i64]);
-                            } else {
-                                self.emit(OpCode::OpSetLocal, vec![symbol.index as i64]);
-                            }
+                            match symbol.scope {
+                                SymbolScope::GlobalScope => self.emit(OpCode::OpSetGlobal, vec![symbol.index as i64]),
+                                _ => self.emit(OpCode::OpSetLocal, vec![symbol.index as i64]),
+                            };
                         }
                     },
                     Statement::ReturnStatement(rs) => {
@@ -223,11 +230,7 @@ impl Compiler {
                         let symbol = self.symbol_table.borrow().resolve(id.value.as_str());
                         match symbol {
                             Some(sym) => {
-                                if sym.scope == GLOBAL_SCOPE {
-                                    self.emit(OpCode::OpGetGlobal, vec![sym.index as i64]);
-                                } else {
-                                    self.emit(OpCode::OpGetLocal, vec![sym.index as i64]);
-                                }
+                                self.load_symbol(&sym);
                             },
                             None => return Err(format!("undefined variable {}", id.value)),
                         };
@@ -423,6 +426,14 @@ impl Compiler {
         self.replace_instruction(last_position, make(OpCode::OpReturnValue, vec![]));
 
         self.scopes[self.scope_index].last_instruction.opcode = OpCode::OpReturnValue;
+    }
+
+    fn load_symbol(&mut self, symbol: &Symbol) {
+        match symbol.scope {
+            SymbolScope::GlobalScope => self.emit(OpCode::OpGetGlobal, vec![symbol.index as i64]),
+            SymbolScope::LocalScope => self.emit(OpCode::OpGetLocal, vec![symbol.index as i64]),
+            SymbolScope::BuiltinScope => self.emit(OpCode::OpGetBuiltin, vec![symbol.index as i64]),
+        };
     }
 }
 
@@ -1148,6 +1159,49 @@ fn() {
                 ],
                 expected_instructions: vec![
                     make(OpCode::OpConstant, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+        ];
+
+        run_compiled_function_tests(compiler_test_cases);
+    }
+
+    #[test]
+    fn test_builtins() {
+        let compiler_test_cases = vec![
+            CompiledFunctionTestCase {
+                input: r#"
+len([]);
+push([], 1);
+"#,
+                expected_constants: vec![
+                    ConstantType::Int(1),
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpGetBuiltin, vec![0]),
+                    make(OpCode::OpArray, vec![0]),
+                    make(OpCode::OpCall, vec![1]),
+                    make(OpCode::OpPop, vec![]),
+                    make(OpCode::OpGetBuiltin, vec![5]),
+                    make(OpCode::OpArray, vec![0]),
+                    make(OpCode::OpConstant, vec![0]),
+                    make(OpCode::OpCall, vec![2]),
+                    make(OpCode::OpPop, vec![]),
+                ]
+            },
+            CompiledFunctionTestCase {
+                input: "fn() { len([]) }",
+                expected_constants: vec![
+                    ConstantType::Instructions(vec![
+                        make(OpCode::OpGetBuiltin, vec![0]),
+                        make(OpCode::OpArray, vec![0]),
+                        make(OpCode::OpCall, vec![1]),
+                        make(OpCode::OpReturnValue, vec![]),
+                    ])
+                ],
+                expected_instructions: vec![
+                    make(OpCode::OpConstant, vec![0]),
                     make(OpCode::OpPop, vec![]),
                 ]
             },

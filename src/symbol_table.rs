@@ -2,10 +2,12 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-pub type SymbolScope = String;
-
-pub const GLOBAL_SCOPE: &str = "GLOBAL";
-pub const LOCAL_SCOPE: &str = "LOCAL";
+#[derive(Clone, Debug, PartialEq)]
+pub enum SymbolScope {
+    GlobalScope,
+    LocalScope,
+    BuiltinScope,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Symbol {
@@ -43,8 +45,8 @@ impl SymbolTable {
 
     pub fn define(&mut self, name: &str) -> Symbol {
         let symbol = Symbol::new(name.clone(), match self.outer {
-            Some(_) => String::from(LOCAL_SCOPE),
-            None => String::from(GLOBAL_SCOPE)
+            Some(_) => SymbolScope::LocalScope,
+            None => SymbolScope::GlobalScope,
         }, self.num_definitions);
 
         self.store.insert(String::from(name), symbol.clone());
@@ -69,6 +71,13 @@ impl SymbolTable {
             },
         }
     }
+
+    pub fn define_builtin(&mut self, index: usize, name: &str) -> Symbol {
+        let symbol = Symbol::new(name, SymbolScope::BuiltinScope, index);
+        self.store.insert(String::from(name), symbol.clone());
+
+        symbol
+    }
 }
 
 #[cfg(test)]
@@ -78,12 +87,12 @@ mod test {
     #[test]
     fn test_define() {
         let expected: HashMap<&str, Symbol> = [
-            ("a", Symbol::new("a", String::from(GLOBAL_SCOPE), 0)),
-            ("b", Symbol::new("b", String::from(GLOBAL_SCOPE), 1)),
-            ("c", Symbol::new("c", String::from(LOCAL_SCOPE), 0)),
-            ("d", Symbol::new("d", String::from(LOCAL_SCOPE), 1)),
-            ("e", Symbol::new("e", String::from(LOCAL_SCOPE), 0)),
-            ("f", Symbol::new("f", String::from(LOCAL_SCOPE), 1)),
+            ("a", Symbol::new("a", SymbolScope::GlobalScope, 0)),
+            ("b", Symbol::new("b", SymbolScope::GlobalScope, 1)),
+            ("c", Symbol::new("c", SymbolScope::LocalScope, 0)),
+            ("d", Symbol::new("d", SymbolScope::LocalScope, 1)),
+            ("e", Symbol::new("e", SymbolScope::LocalScope, 0)),
+            ("f", Symbol::new("f", SymbolScope::LocalScope, 1)),
         ].iter().cloned().collect();
 
         let mut global = SymbolTable::new();
@@ -118,8 +127,8 @@ mod test {
         global.define("b");
 
         let expected = vec![
-            Symbol::new("a", String::from(GLOBAL_SCOPE), 0),
-            Symbol::new("b", String::from(GLOBAL_SCOPE), 1),
+            Symbol::new("a", SymbolScope::GlobalScope, 0),
+            Symbol::new("b", SymbolScope::GlobalScope, 1),
         ];
 
         for symbol in expected {
@@ -142,10 +151,10 @@ mod test {
         local.define("d");
 
         let expected = vec![
-            Symbol::new("a", String::from(GLOBAL_SCOPE), 0),
-            Symbol::new("b", String::from(GLOBAL_SCOPE), 1),
-            Symbol::new("c", String::from(LOCAL_SCOPE), 0), 
-            Symbol::new("d", String::from(LOCAL_SCOPE), 1),
+            Symbol::new("a", SymbolScope::GlobalScope, 0),
+            Symbol::new("b", SymbolScope::GlobalScope, 1),
+            Symbol::new("c", SymbolScope::LocalScope, 0), 
+            Symbol::new("d", SymbolScope::LocalScope, 1),
         ];
 
         for symbol in expected {
@@ -180,19 +189,19 @@ mod test {
             SymbolTableTest {
                 table: first_local,
                 expected_symbols: vec![
-                    Symbol::new("a", String::from(GLOBAL_SCOPE), 0),
-                    Symbol::new("b", String::from(GLOBAL_SCOPE), 1),
-                    Symbol::new("c", String::from(LOCAL_SCOPE), 0), 
-                    Symbol::new("d", String::from(LOCAL_SCOPE), 1),
+                    Symbol::new("a", SymbolScope::GlobalScope, 0),
+                    Symbol::new("b", SymbolScope::GlobalScope, 1),
+                    Symbol::new("c", SymbolScope::LocalScope, 0), 
+                    Symbol::new("d", SymbolScope::LocalScope, 1),
                 ]
             },
             SymbolTableTest {
                 table: second_local,
                 expected_symbols: vec![
-                    Symbol::new("a", String::from(GLOBAL_SCOPE), 0),
-                    Symbol::new("b", String::from(GLOBAL_SCOPE), 1),
-                    Symbol::new("e", String::from(LOCAL_SCOPE), 0), 
-                    Symbol::new("f", String::from(LOCAL_SCOPE), 1),
+                    Symbol::new("a", SymbolScope::GlobalScope, 0),
+                    Symbol::new("b", SymbolScope::GlobalScope, 1),
+                    Symbol::new("e", SymbolScope::LocalScope, 0), 
+                    Symbol::new("f", SymbolScope::LocalScope, 1),
                 ]
             },
         ];
@@ -202,6 +211,36 @@ mod test {
                 let result = symbol_table_test.table.resolve(symbol.name.as_str());
                 match result {
                     Some(res) => assert_eq!(res, symbol),
+                    None => assert!(false, "Name could not be resolved."),
+                };
+            }
+        }
+    }
+
+    #[test]
+    fn test_define_resolve_builtins() {
+        let mut global = SymbolTable::new();
+
+        let expected = vec![
+            Symbol::new("a", SymbolScope::BuiltinScope, 0),
+            Symbol::new("c", SymbolScope::BuiltinScope, 1),
+            Symbol::new("e", SymbolScope::BuiltinScope, 2),
+            Symbol::new("f", SymbolScope::BuiltinScope, 3),
+        ];
+
+        for (i, value) in expected.iter().enumerate() {
+            global.define_builtin(i, value.name.as_str());
+        }
+
+        let first_local = SymbolTable::new_enclosed(Rc::new(RefCell::new(global.clone())));
+        let second_local = SymbolTable::new_enclosed(Rc::new(RefCell::new(first_local.clone())));
+
+        let symbol_tables = vec![global, first_local, second_local];
+        for table in symbol_tables {
+            for symbol in &expected {
+                let result = table.resolve(symbol.name.as_str());
+                match result {
+                    Some(res) => assert_eq!(res, *symbol),
                     None => assert!(false, "Name could not be resolved."),
                 };
             }

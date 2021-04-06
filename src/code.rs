@@ -29,6 +29,7 @@ pub enum OpCode {
     OpReturn,
     OpGetLocal,
     OpSetLocal,
+    OpGetBuiltin,
 }
 
 impl From<u8> for OpCode {
@@ -60,6 +61,7 @@ impl From<u8> for OpCode {
             24 => OpCode::OpReturn,
             25 => OpCode::OpGetLocal,
             26 => OpCode::OpSetLocal,
+            27 => OpCode::OpGetBuiltin,
             _ => OpCode::OpNull,
         }
     }
@@ -104,6 +106,7 @@ fn lookup(op: &OpCode) -> Definition {
         OpCode::OpReturn => Definition::new("OpReturn", vec![]),
         OpCode::OpGetLocal => Definition::new("OpGetLocal", vec![1]),
         OpCode::OpSetLocal => Definition::new("OpSetLocal", vec![1]),
+        OpCode::OpGetBuiltin => Definition::new("OpGetBuiltin", vec![1]),
     }
 }
 

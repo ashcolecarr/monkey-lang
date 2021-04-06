@@ -4,7 +4,7 @@ use std::hash::{Hash, Hasher};
 
 #[derive(Clone)]
 pub struct Builtins {
-    builtins: HashMap<String, BuiltinFunction>,
+    pub builtins: HashMap<String, BuiltinFunction>,
 }
 
 impl Builtins {
@@ -12,17 +12,47 @@ impl Builtins {
         let mut builtin_object = Self { builtins: HashMap::new() };
 
         builtin_object.builtins.insert(String::from("len"), Self::len);
+        builtin_object.builtins.insert(String::from("puts"), Self::puts);
         builtin_object.builtins.insert(String::from("first"), Self::first);
         builtin_object.builtins.insert(String::from("last"), Self::last);
         builtin_object.builtins.insert(String::from("rest"), Self::rest);
         builtin_object.builtins.insert(String::from("push"), Self::push);
-        builtin_object.builtins.insert(String::from("puts"), Self::puts);
 
         builtin_object
     }
 
     pub fn get(&self, name: &str) -> Option<Object> {
         match self.builtins.get(&String::from(name)) {
+            Some(b) => Some(Object::Builtin(Builtin::new(b.clone()))),
+            None => None,
+        }
+    }
+
+    // Needed since HashMap does not guarantee order of insertion.
+    pub fn get_index(&self, name: &str) -> usize {
+        match name {
+            "len" => 0,
+            "puts" => 1,
+            "first" => 2,
+            "last" => 3,
+            "rest" => 4,
+            "push" => 5,
+            _ => panic!("Not a valid builtin name."),
+        }
+    }
+
+    pub fn index(&self, value: usize) -> Option<Object> {
+        let builtin = match value {
+            0 => self.builtins.get(&String::from("len")),
+            1 => self.builtins.get(&String::from("puts")),
+            2 => self.builtins.get(&String::from("first")),
+            3 => self.builtins.get(&String::from("last")),
+            4 => self.builtins.get(&String::from("rest")),
+            5 => self.builtins.get(&String::from("push")),
+            _ => None,
+        };
+
+        match builtin {
             Some(b) => Some(Object::Builtin(Builtin::new(b.clone()))),
             None => None,
         }
