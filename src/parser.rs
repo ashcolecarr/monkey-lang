@@ -114,6 +114,22 @@ impl Parser {
 
         self.next_token();
         let value = self.parse_expression(&Precedence::Lowest);
+        match value.clone() {
+            Some(val) => {
+                match val.clone() {
+                    Expression::FunctionLiteral(mut fl) => {
+                        fl.name = name.clone().value;
+                        if self.peek_token_is(&TokenType::Semicolon) {
+                            self.next_token();
+                        }
+
+                        return Some(LetStatement::new(current_token, name, Some(Expression::FunctionLiteral(fl.clone()))));
+                    },
+                    _ => (),
+                };
+            },
+            None => (),
+        }
 
         if self.peek_token_is(&TokenType::Semicolon) {
             self.next_token();
@@ -286,7 +302,7 @@ impl Parser {
         let body = self.parse_block_statement();
 
         match parameters {
-            Some(param) => Some(Expression::FunctionLiteral(FunctionLiteral::new(current_token, param, body))),
+            Some(param) => Some(Expression::FunctionLiteral(FunctionLiteral::new(current_token, param, body, ""))),
             None => None
         }
     }
@@ -1541,6 +1557,39 @@ mod test {
                         }
                     },
                     _ => assert!(false, "Statement was not an ExpressionStatement."),
+                };
+            },
+            None => assert!(false, "Program could not be parsed."),
+        };
+    }
+
+    #[test]
+    fn test_function_literal_with_name() {
+        let input = "let myFunction = fn() { };";
+
+        let lexer = Lexer::new(input);
+        let mut parser = Parser::new(lexer);
+
+        let program = parser.parse_program();
+        check_parser_errors(&parser);
+
+        match program {
+            Some(p) => {
+                assert_eq!(p.statements.len(), 1);
+
+                match &p.statements[0] {
+                    Statement::LetStatement(ls) => {
+                        match &ls.value {
+                            Some(val) => {
+                                match val {
+                                    Expression::FunctionLiteral(fl) => assert_eq!(fl.name, "myFunction"),
+                                    _ => assert!(false, "Expression was not a FunctionLiteral."),
+                                };
+                            },
+                            None => assert!(false, "Expression could not be parsed."),
+                        }
+                    },
+                    _ => assert!(false, "Statement was not a LetStatement."),
                 };
             },
             None => assert!(false, "Program could not be parsed."),

@@ -24,8 +24,9 @@ pub struct VM {
 impl VM {
     pub fn new(bytecode: Bytecode) -> Self {
         let main_fun = CompiledFunction::new(bytecode.instructions, 0, 0);
-        let main_frame = Frame::new(main_fun, 0);
-        let mut frames = vec![Frame::new(CompiledFunction::new(vec![], 0, 0), 0); MAX_FRAMES];
+        let main_closure = Closure::new(main_fun, vec![]);
+        let main_frame = Frame::new(main_closure, 0);
+        let mut frames = vec![Frame::new(Closure::new(CompiledFunction::new(vec![], 0, 0), vec![]), 0); MAX_FRAMES];
         frames[0] = main_frame;
 
         Self {
@@ -256,6 +257,39 @@ impl VM {
                         None => return Err(format!("builtin for index {} could not be found.", builtin_index)),
                     };
                 },
+                OpCode::OpClosure => {
+                    let mut bytes = [0; 2];
+                    bytes[0] = self.current_frame().instructions()[ip + 1];
+                    bytes[1] = self.current_frame().instructions()[ip + 2];
+                    let const_index = read_u16(&bytes);
+
+                    let mut byte = [0; 1];
+                    byte[0] = self.current_frame().instructions()[ip + 3];
+                    let num_free = read_u8(&byte);
+
+                    self.current_frame_mut().ip += 3;
+
+                    if let Err(e) = self.push_closure(const_index as usize, num_free as usize) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpGetFree => {
+                    let mut byte = [0; 1];
+                    byte[0] = self.current_frame().instructions()[ip + 1];
+                    let free_index = read_u8(&byte);
+                    self.current_frame_mut().ip += 1;
+
+                    let current_closure = self.current_frame().closure.clone();
+                    if let Err(e) = self.push(current_closure.free[free_index as usize].clone()) {
+                        return Err(e);
+                    }
+                },
+                OpCode::OpCurrentClosure => {
+                    let current_closure = self.current_frame().closure.clone();
+                    if let Err(e) = self.push(Object::Closure(current_closure)) {
+                        return Err(e);
+                    }
+                },
             };
         }
 
@@ -467,21 +501,22 @@ impl VM {
 
     fn execute_call(&mut self, number_arguments: usize) -> Result<(), String> {
         match self.stack[self.sp - 1 - number_arguments].clone() {
-            Object::CompiledFunction(cf) => self.call_function(&cf, number_arguments),
+            Object::Closure(cl) => self.call_closure(&cl, number_arguments),
             Object::Builtin(bi) => self.call_builtin(&bi, number_arguments),
-            _ => Err(String::from("calling non-function and non-built-in")),
+            _ => Err(String::from("calling non-closure and non-built-in")),
         }
     }
 
-    fn call_function(&mut self, fun: &CompiledFunction, number_arguments: usize) -> Result<(), String> {
-        if number_arguments != fun.num_parameters {
+    fn call_closure(&mut self, closure: &Closure, number_arguments: usize) -> Result<(), String> {
+        if number_arguments != closure.fun.num_parameters {
             return Err(format!("wrong number of arguments: want {}, got {}",
-                fun.num_parameters, number_arguments));
+                closure.fun.num_parameters, number_arguments));
         }
 
-        let frame = Frame::new(fun.clone(), self.sp - number_arguments);
+        let frame = Frame::new(closure.clone(), self.sp - number_arguments);
         self.push_frame(frame.clone());
-        self.sp = frame.base_pointer + fun.num_locals;
+
+        self.sp = frame.base_pointer + closure.fun.num_locals;
 
         Ok(())
     }
@@ -500,6 +535,23 @@ impl VM {
             _ => {
                 self.push(result)
             }
+        }
+    }
+
+    fn push_closure(&mut self, const_index: usize, num_free: usize) -> Result<(), String> {
+        let constant = &self.constants[const_index];
+        match constant {
+            Object::CompiledFunction(cf) => {
+                let mut free = vec![Object::Null(Null::new()); num_free];
+                for i in 0..num_free {
+                    free[i] = self.stack[self.sp - num_free + i].clone();
+                }
+                self.sp = self.sp - num_free;
+
+                let closure = Object::Closure(Closure::new(cf.clone(), free));
+                self.push(closure)
+            },
+            _ => Err(format!("not a function: {}", constant)),
         }
     }
 
@@ -988,6 +1040,134 @@ outer() + globalNum;
         run_vm_tests(vm_test_cases_none);
         run_vm_tests(vm_test_cases_error);
         run_vm_tests(vm_test_cases_array);
+    }
+
+    #[test]
+    fn test_closures() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let newClosure = fn(a) {
+    fn() { a; };
+};
+let closure = newClosure(99);
+closure();
+"#, expected: 99 },
+            VMTestCase { input: r#"
+let newAdder = fn(a, b) {
+    fn(c) { a + b + c };
+};
+let adder = newAdder(1, 2);
+adder(8);
+"#, expected: 11 },
+            VMTestCase { input: r#"
+let newAdder = fn(a, b) {
+    let c = a + b;
+    fn(d) { c + d };
+};
+let adder = newAdder(1, 2);
+adder(8);
+"#, expected: 11 },
+            VMTestCase { input: r#"
+let newAdderOuter = fn(a, b) {
+    let c = a + b;
+    fn(d) {
+        let e = d + c;
+        fn(f) { e + f; };
+    };
+};
+let newAdderInner = newAdderOuter(1, 2)
+let adder = newAdderInner(3);
+adder(8);
+"#, expected: 14 },
+            VMTestCase { input: r#"
+let a = 1;
+let newAdderOuter = fn(b) {
+    fn(c) {
+        fn(d) { a + b + c + d };
+    };
+};
+let newAdderInner = newAdderOuter(2)
+let adder = newAdderInner(3);
+adder(8);
+"#, expected: 14 },
+            VMTestCase { input: r#"
+let newClosure = fn(a, b) {
+    let one = fn() { a; };
+    let two = fn() { b; };
+    fn() { one() + two(); };
+};
+let closure = newClosure(9, 90);
+closure();
+"#, expected: 99 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_recursive_functions() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let countDown = fn(x) {
+    if (x == 0) {
+        return 0;
+    } else {
+        countDown(x - 1);
+    }
+};
+countDown(1);
+"#, expected: 0 },
+            VMTestCase { input: r#"
+let countDown = fn(x) {
+    if (x == 0) {
+        return 0;
+    } else {
+        countDown(x - 1);
+    }
+};
+let wrapper = fn() {
+    countDown(1);
+};
+wrapper();
+"#, expected: 0 },
+            VMTestCase { input: r#"
+let wrapper = fn() {
+    let countDown = fn(x) {
+        if (x == 0) {
+            return 0;
+        } else {
+            countDown(x - 1);
+        }
+    };
+    countDown(1);
+};
+wrapper();
+"#, expected: 0 },
+        ];
+
+        run_vm_tests(vm_test_cases);
+    }
+
+    #[test]
+    fn test_recursive_fibonacci() {
+        let vm_test_cases = vec![
+            VMTestCase { input: r#"
+let fibonacci = fn(x) {
+    if (x == 0) {
+        return 0;
+    } else {
+        if (x == 1) {
+            return 1;
+        } else {
+            fibonacci(x - 1) + fibonacci(x - 2);
+        }
+    }
+};
+fibonacci(15);
+"#, expected: 610 },
+        ];
+
+        run_vm_tests(vm_test_cases);
     }
 
     fn run_vm_tests<T>(tests: Vec<VMTestCase<T>>) where T: ValueType {

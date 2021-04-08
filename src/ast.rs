@@ -326,19 +326,21 @@ pub struct FunctionLiteral {
     pub token: Token,
     pub parameters: Vec<Identifier>,
     pub body: BlockStatement,
+    pub name: String,
 }
 
 impl Display for FunctionLiteral {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result {
         let params: Vec<String> = self.parameters.iter().map(|p| format!("{}", p)).collect();
+        let display_name = if !self.name.is_empty() { format!("<{}>", self.name) } else { String::new() };
 
-        write!(f, "{}({}) {}", self.token.literal, params.join(", "), self.body)
+        write!(f, "{}{}({}) {}", self.token.literal, display_name, params.join(", "), self.body)
     }
 }
 
 impl FunctionLiteral {
-    pub fn new(token: Token, parameters: Vec<Identifier>, body: BlockStatement) -> Self {
-        Self { token, parameters, body }
+    pub fn new(token: Token, parameters: Vec<Identifier>, body: BlockStatement, name: &str) -> Self {
+        Self { token, parameters, body, name: String::from(name) }
     }
 }
 

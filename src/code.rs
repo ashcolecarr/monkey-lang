@@ -30,6 +30,9 @@ pub enum OpCode {
     OpGetLocal,
     OpSetLocal,
     OpGetBuiltin,
+    OpClosure,
+    OpGetFree,
+    OpCurrentClosure,
 }
 
 impl From<u8> for OpCode {
@@ -62,6 +65,9 @@ impl From<u8> for OpCode {
             25 => OpCode::OpGetLocal,
             26 => OpCode::OpSetLocal,
             27 => OpCode::OpGetBuiltin,
+            28 => OpCode::OpClosure,
+            29 => OpCode::OpGetFree,
+            30 => OpCode::OpCurrentClosure,
             _ => OpCode::OpNull,
         }
     }
@@ -107,6 +113,9 @@ fn lookup(op: &OpCode) -> Definition {
         OpCode::OpGetLocal => Definition::new("OpGetLocal", vec![1]),
         OpCode::OpSetLocal => Definition::new("OpSetLocal", vec![1]),
         OpCode::OpGetBuiltin => Definition::new("OpGetBuiltin", vec![1]),
+        OpCode::OpClosure => Definition::new("OpClosure", vec![2, 1]),
+        OpCode::OpGetFree => Definition::new("OpGetFree", vec![1]),
+        OpCode::OpCurrentClosure => Definition::new("OpCurrentClosure", vec![]),
     }
 }
 
@@ -137,6 +146,7 @@ fn format_instruction(definition: &Definition, operands: &Vec<i64>) -> String {
     match operand_count {
         0 => definition.name.clone(),
         1 => format!("{} {}", definition.name, operands[0]),
+        2 => format!("{} {} {}", definition.name, operands[0], operands[1]),
         _ => format!("ERROR: unhandled operand_count for {}\n", definition.name),
     }
 }
@@ -225,6 +235,7 @@ mod test {
             MakeTest { op: OpCode::OpConstant, operands: vec![65534], expected: vec![OpCode::OpConstant as u8, 255, 254] },
             MakeTest { op: OpCode::OpAdd, operands: vec![], expected: vec![OpCode::OpAdd as u8] },
             MakeTest { op: OpCode::OpGetLocal, operands: vec![255], expected: vec![OpCode::OpGetLocal as u8, 255] },
+            MakeTest { op: OpCode::OpClosure, operands: vec![65534, 255], expected: vec![OpCode::OpClosure as u8, 255, 254, 255] },
         ];
 
         for make_test in make_tests {
@@ -244,12 +255,14 @@ mod test {
             make(OpCode::OpGetLocal, vec![1]),
             make(OpCode::OpConstant, vec![2]),
             make(OpCode::OpConstant, vec![65535]),
+            make(OpCode::OpClosure, vec![65535, 255]),
         ];
 
         let expected = r#"0000 OpAdd
 0001 OpGetLocal 1
 0003 OpConstant 2
 0006 OpConstant 65535
+0009 OpClosure 65535 255
 "#;
 
         let mut concatted = vec![];
@@ -271,6 +284,7 @@ mod test {
         let operand_tests = vec![
             OperandTest { op: OpCode::OpConstant, operands: vec![65535], bytes_read: 2 },
             OperandTest { op: OpCode::OpGetLocal, operands: vec![255], bytes_read: 1 },
+            OperandTest { op: OpCode::OpClosure, operands: vec![65535, 255], bytes_read: 3 },
         ];
 
         for operand_test in operand_tests {

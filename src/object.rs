@@ -18,6 +18,7 @@ const BUILTIN_OBJ: &str = "BUILTIN";
 const ARRAY_OBJ: &str = "ARRAY"; 
 const HASH_OBJ: &str = "HASH"; 
 const COMPILED_FUNCTION_OBJ: &str = "COMPILED_FUNCTION"; 
+const CLOSURE_OBJ: &str = "CLOSURE"; 
 
 pub type BuiltinFunction = fn(arguments: &Vec<Object>) -> Object;
 
@@ -35,6 +36,7 @@ pub enum Object {
     Array(Array),
     Hash(HashObject),
     CompiledFunction(CompiledFunction),
+    Closure(Closure),
 }
 
 impl Display for Object {
@@ -52,6 +54,7 @@ impl Display for Object {
             Self::Array(a) => format!("{}", a),
             Self::Hash(h) => format!("{}", h),
             Self::CompiledFunction(cf) => format!("{}", cf),
+            Self::Closure(cl) => format!("{}", cl),
         })
     }
 }
@@ -71,6 +74,7 @@ impl Object {
             Self::Array(a) => a.type_of(),
             Self::Hash(h) => h.type_of(),
             Self::CompiledFunction(cf) => cf.type_of(),
+            Self::Closure(cl) => cl.type_of(),
         }
     }
 
@@ -372,6 +376,28 @@ impl CompiledFunction {
 
     pub fn type_of(&self) -> &str {
         COMPILED_FUNCTION_OBJ
+    }
+}
+
+#[derive(Clone, Eq, Hash, PartialEq)]
+pub struct Closure {
+    pub fun: CompiledFunction,
+    pub free: Vec<Object>,
+}
+
+impl Display for Closure {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result {
+        write!(f, "Closure[{}]", self)
+    }
+}
+
+impl Closure {
+    pub fn new(fun: CompiledFunction, free: Vec<Object>) -> Self {
+        Self { fun, free }
+    }
+
+    pub fn type_of(&self) -> &str {
+        CLOSURE_OBJ
     }
 }
 

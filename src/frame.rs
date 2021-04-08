@@ -1,19 +1,19 @@
 use super::code::Instructions;
-use super::object::CompiledFunction;
+use super::object::Closure;
 
 #[derive(Clone)]
 pub struct Frame {
-    fun: CompiledFunction,
+    pub closure: Closure,
     pub ip: i64,
     pub base_pointer: usize,
 }
 
 impl Frame {
-    pub fn new(fun: CompiledFunction, base_pointer: usize) -> Self {
-        Self { fun, ip: -1, base_pointer }
+    pub fn new(closure: Closure, base_pointer: usize) -> Self {
+        Self { closure, ip: -1, base_pointer }
     }
 
     pub fn instructions(&self) -> Instructions {
-        self.fun.instructions.clone()
+        self.closure.fun.instructions.clone()
     }
 }

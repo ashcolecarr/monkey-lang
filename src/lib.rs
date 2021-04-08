@@ -8,6 +8,7 @@ pub mod frame;
 pub mod lexer;
 pub mod object;
 pub mod parser;
+pub mod profiler;
 pub mod repl;
 pub mod symbol_table;
 pub mod token;
